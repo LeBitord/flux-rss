@@ -58,10 +58,13 @@ function isAuthorizedCronRequest(req: Request): boolean {
   return timingSafeEqual(a, b);
 }
 
-async function sendDiscordEmbeds(webhookUrl: string, category: Category, items: NewItem[]) {
+async function sendDiscordEmbeds(
+  webhookUrl: string,
+  category: Category,
+  items: NewItem[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!isValidDiscordWebhookUrl(webhookUrl)) {
-    console.error(`Invalid Discord webhook URL for category ${category.name}`);
-    return;
+    return { ok: false, error: "URL de webhook Discord invalide" };
   }
 
   const color = hexToInt(category.color);
@@ -81,14 +84,45 @@ async function sendDiscordEmbeds(webhookUrl: string, category: Category, items: 
     `**${category.name}** — ${items.length} nouvel(le)(s) article(s)` +
     (overflow > 0 ? `\n…et ${overflow} autre(s) non affiché(s).` : "");
 
-  const res = await fetch(webhookUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, embeds }),
-  });
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, embeds }),
+    });
 
-  if (!res.ok) {
-    console.error(`Discord webhook failed for ${category.name}: ${res.status}`);
+    if (!res.ok) {
+      return { ok: false, error: `Discord a répondu ${res.status}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function sendFailureAlert(errors: { feed: string; error: string }[]) {
+  const webhookUrl = process.env.ALERTS_DISCORD_WEBHOOK_URL;
+  if (!webhookUrl || errors.length === 0) return;
+  if (!isValidDiscordWebhookUrl(webhookUrl)) {
+    console.error("Invalid ALERTS_DISCORD_WEBHOOK_URL");
+    return;
+  }
+
+  const lines = errors.slice(0, 15).map((e) => `• **${e.feed}** — ${e.error}`);
+  const overflow = errors.length - 15;
+  const content =
+    `⚠️ **Flux RSS — ${errors.length} erreur(s) lors du dernier passage**\n` +
+    lines.join("\n") +
+    (overflow > 0 ? `\n…et ${overflow} autre(s).` : "");
+
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: content.slice(0, 2000) }),
+    });
+  } catch (err) {
+    console.error("Failed to send failure alert:", err);
   }
 }
 
@@ -188,9 +222,15 @@ export async function GET(req: Request) {
   for (const [categoryId, items] of newItemsByCategory) {
     const category = categoryById.get(categoryId);
     if (!category) continue;
-    await sendDiscordEmbeds(category.discord_webhook_url, category, items);
+    const result = await sendDiscordEmbeds(category.discord_webhook_url, category, items);
+    if (!result.ok) {
+      errors.push({ feed: `catégorie ${category.name}`, error: result.error });
+      continue;
+    }
     digestsSent += 1;
   }
+
+  await sendFailureAlert(errors);
 
   return Response.json({
     feedsPolled: feedList.length,
