@@ -1,6 +1,8 @@
+import { timingSafeEqual } from "node:crypto";
 import Parser from "rss-parser";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { Category, Feed } from "@/lib/types";
+import { assertPublicHttpUrl, isValidDiscordWebhookUrl } from "@/lib/url-safety";
 
 export const maxDuration = 300;
 
@@ -44,7 +46,24 @@ function matchesKeywords(
   return terms.some((term) => haystack.includes(term));
 }
 
+function isAuthorizedCronRequest(req: Request): boolean {
+  const authHeader = req.headers.get("authorization");
+  const secret = process.env.CRON_SECRET;
+  if (!authHeader || !secret) return false;
+
+  const expected = `Bearer ${secret}`;
+  const a = Buffer.from(authHeader);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 async function sendDiscordEmbeds(webhookUrl: string, category: Category, items: NewItem[]) {
+  if (!isValidDiscordWebhookUrl(webhookUrl)) {
+    console.error(`Invalid Discord webhook URL for category ${category.name}`);
+    return;
+  }
+
   const color = hexToInt(category.color);
   const shown = items.slice(0, MAX_EMBEDS_PER_MESSAGE);
   const overflow = items.length - shown.length;
@@ -74,8 +93,7 @@ async function sendDiscordEmbeds(webhookUrl: string, category: Category, items: 
 }
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isAuthorizedCronRequest(req)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -103,6 +121,7 @@ export async function GET(req: Request) {
 
   for (const feed of feedList) {
     try {
+      await assertPublicHttpUrl(feed.url);
       const parsed = await parser.parseURL(feed.url);
       const items = parsed.items ?? [];
       if (items.length === 0) continue;
