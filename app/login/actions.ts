@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { COOKIE_NAME, expectedToken, verifyPassword } from "@/lib/auth";
+import { COOKIE_NAME, setSessionCookie, verifyPassword } from "@/lib/auth";
 
 export type LoginState = { error?: string };
 
@@ -17,14 +17,7 @@ export async function login(
     return { error: "Mot de passe incorrect." };
   }
 
-  const store = await cookies();
-  store.set(COOKIE_NAME, expectedToken(), {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30,
-  });
+  await setSessionCookie();
 
   redirect(redirectTo.startsWith("/") ? redirectTo : "/admin");
 }
