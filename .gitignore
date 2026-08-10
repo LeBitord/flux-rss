@@ -40,5 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-.vercel
-.env*
+# AI tooling config (local dev aid, not part of the app)
+.claude/
+.agents/
+skills-lock.json

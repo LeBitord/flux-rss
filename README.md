@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Flux RSS
 
-## Getting Started
+Agrégateur RSS multi-domaines qui surveille des flux RSS/Atom, filtre les articles par mots-clés et fraîcheur, puis notifie les nouveautés vers des salons Discord dédiés (une catégorie = un salon = une couleur d'embed).
 
-First, run the development server:
+## Fonctionnalités
+
+- **Panel d'administration** protégé par mot de passe (auto-hébergé, sans dépendance à un fournisseur d'identité externe) : gestion des catégories, des flux et de leurs filtres par mots-clés.
+- **Polling planifié** (Vercel Cron) : parsing des flux, déduplication, filtrage par ancienneté et par mots-clés, puis notification Discord sous forme d'embeds riches.
+- **Alerte automatique** vers un salon Discord dédié en cas d'échec (flux cassé, webhook invalide) — pas besoin de surveiller manuellement.
+- **Sécurité** : mot de passe haché (scrypt), invalidation de session au changement de mot de passe, verrouillage anti-bruteforce sur la connexion, garde-fou SSRF sur les URLs saisies, headers de sécurité (CSP, HSTS, anti-clickjacking).
+
+## Stack
+
+- [Next.js](https://nextjs.org) (App Router) + [shadcn/ui](https://ui.shadcn.com) (Base UI)
+- [Supabase](https://supabase.com) (Postgres) pour la persistance
+- [Vercel](https://vercel.com) pour l'hébergement et les tâches planifiées (Cron)
+- [rss-parser](https://www.npmjs.com/package/rss-parser) pour le parsing des flux
+
+## Développement local
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Nécessite un fichier `.env.local` (non versionné) avec :
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Description |
+|---|---|
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Accès à la base Supabase |
+| `CRON_SECRET` | Secret partagé pour authentifier les appels du cron vers `/api/poll` |
+| `ADMIN_PASSWORD` | Mot de passe de secours tant qu'aucun mot de passe n'a été défini via le panel |
+| `SESSION_SECRET` | Secret de signature des sessions |
+| `ALERTS_DISCORD_WEBHOOK_URL` | Webhook Discord pour les alertes d'échec (optionnel) |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Base de données
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Les migrations SQL se trouvent dans `supabase/migrations/`. Le script `scripts/migrate.mjs` les applique dans l'ordre à la base configurée dans les variables d'environnement.
