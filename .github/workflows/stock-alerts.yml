@@ -1,0 +1,18 @@
+name: Stock threshold alerts
+
+on:
+  schedule:
+    # Every hour, 7:00-16:00 UTC, Mon-Fri — covers Euronext Paris trading hours
+    # (09:00-17:30 local) across both CET and CEST. Vercel Hobby cron jobs are
+    # capped at once/day, so this runs from GitHub Actions instead.
+    - cron: "0 7-16 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call stock-alert endpoint
+        run: |
+          curl -sf -X GET "https://flux-rss-fawn.vercel.app/api/stock-alert" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

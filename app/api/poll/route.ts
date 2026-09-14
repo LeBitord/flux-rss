@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import Parser from "rss-parser";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { Category, Feed } from "@/lib/types";
@@ -6,6 +5,7 @@ import { assertPublicHttpUrl } from "@/lib/url-safety";
 import { scoreRelevance } from "@/lib/relevance";
 import { sendBotMessage, type DiscordActionRow, type DiscordButton } from "@/lib/discord-bot";
 import { getStockQuotes, formatStockLine } from "@/lib/stocks";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const maxDuration = 300;
 
@@ -77,18 +77,6 @@ function passesKeywordFilters(
   const includeTerms = parseTerms(keywords);
   if (includeTerms.length === 0) return true;
   return includeTerms.some((term) => haystack.includes(term));
-}
-
-function isAuthorizedCronRequest(req: Request): boolean {
-  const authHeader = req.headers.get("authorization");
-  const secret = process.env.CRON_SECRET;
-  if (!authHeader || !secret) return false;
-
-  const expected = `Bearer ${secret}`;
-  const a = Buffer.from(authHeader);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
 }
 
 async function sendCategoryDigest(
