@@ -3,6 +3,7 @@ import Parser from "rss-parser";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { Category, Feed } from "@/lib/types";
 import { assertPublicHttpUrl, isValidDiscordWebhookUrl } from "@/lib/url-safety";
+import { scoreRelevance } from "@/lib/relevance";
 
 export const maxDuration = 300;
 
@@ -14,7 +15,10 @@ type NewItem = {
   description?: string;
   imageUrl?: string;
   publishedAt?: string;
+  score?: number;
 };
+
+const HIGH_RELEVANCE_THRESHOLD = 8;
 
 const parser = new Parser({ timeout: 15000 });
 const MAX_EMBEDS_PER_MESSAGE = 10;
@@ -89,7 +93,9 @@ async function sendDiscordEmbeds(
   const overflow = items.length - shown.length;
 
   const embeds = shown.map((item) => ({
-    title: item.title.slice(0, 256),
+    title: (
+      (item.score ?? 0) >= HIGH_RELEVANCE_THRESHOLD ? `🔥 ${item.title}` : item.title
+    ).slice(0, 256),
     url: item.link,
     color,
     description: item.description,
@@ -242,6 +248,15 @@ export async function GET(req: Request) {
   for (const [categoryId, items] of newItemsByCategory) {
     const category = categoryById.get(categoryId);
     if (!category) continue;
+
+    // Score with a fast/cheap model and sort highest-first, so if there are more
+    // items than MAX_EMBEDS_PER_MESSAGE, the most important ones are the ones kept.
+    const scores = await scoreRelevance(category.name, items);
+    items.forEach((item, i) => {
+      item.score = scores[i];
+    });
+    items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
     const result = await sendDiscordEmbeds(category.discord_webhook_url, category, items);
     if (!result.ok) {
       errors.push({ feed: `catégorie ${category.name}`, error: result.error });
