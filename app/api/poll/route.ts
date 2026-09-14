@@ -214,6 +214,8 @@ export async function GET(req: Request) {
         feed_id: feed.id,
         guid: item.guid ?? item.link ?? item.title ?? "",
         published_at: item.isoDate ?? item.pubDate ?? null,
+        title: item.title ?? null,
+        link: item.link ?? null,
       }));
 
       // Upsert + ignoreDuplicates avoids a huge "already seen?" lookup query (which can
@@ -286,16 +288,18 @@ export async function GET(req: Request) {
     });
     items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
-    // Persist extracted topics so the feedback buttons can look them up on click.
+    // Persist extracted topics + score: topics feed the feedback buttons on click,
+    // score feeds /recap and future feed-health checks.
     await Promise.all(
-      items
-        .filter((item) => item.topics && item.topics.length > 0)
-        .map((item) =>
-          db
-            .from("seen_items")
-            .update({ topics: item.topics!.join(", ") })
-            .eq("id", item.seenItemId),
-        ),
+      items.map((item) =>
+        db
+          .from("seen_items")
+          .update({
+            topics: item.topics && item.topics.length > 0 ? item.topics.join(", ") : null,
+            score: item.score ?? null,
+          })
+          .eq("id", item.seenItemId),
+      ),
     );
 
     const result = await sendCategoryDigest(category, items);

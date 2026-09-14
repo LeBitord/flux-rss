@@ -6,6 +6,15 @@ import {
 } from "discord-interactions";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+const RECAP_WINDOW_DAYS = 3;
+const RECAP_LIMIT = 10;
+const HIGH_RELEVANCE_THRESHOLD = 8;
+
+function hexToInt(hex: string): number {
+  const parsed = parseInt(hex.replace("#", ""), 16);
+  return Number.isNaN(parsed) ? 0x5865f2 : parsed;
+}
+
 function mergeKeywords(existing: string | null, additions: string[]): string {
   const current = (existing ?? "")
     .split(",")
@@ -108,6 +117,82 @@ export async function POST(req: Request) {
       data: {
         content: `${emoji} Noté — "${topics.join(", ")}" ${direction === "up" ? "renforcé" : "exclu"} pour ce flux.`,
         flags: InteractionResponseFlags.EPHEMERAL,
+      },
+    });
+  }
+
+  if (body.type === InteractionType.APPLICATION_COMMAND && body.data?.name === "recap") {
+    const channelId: string | undefined = body.channel_id;
+    const db = supabaseAdmin();
+
+    const { data: category } = await db
+      .from("categories")
+      .select("*")
+      .eq("discord_channel_id", channelId)
+      .maybeSingle();
+
+    if (!category) {
+      return Response.json({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: "Ce salon n'est associé à aucune catégorie flux-rss.",
+          flags: InteractionResponseFlags.EPHEMERAL,
+        },
+      });
+    }
+
+    const { data: feedsInCategory } = await db
+      .from("feeds")
+      .select("id")
+      .eq("category_id", category.id);
+    const feedIds = (feedsInCategory ?? []).map((f) => f.id as string);
+
+    if (feedIds.length === 0) {
+      return Response.json({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: `Aucun flux configuré pour **${category.name}**.`,
+          flags: InteractionResponseFlags.EPHEMERAL,
+        },
+      });
+    }
+
+    const since = new Date(Date.now() - RECAP_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentItems } = await db
+      .from("seen_items")
+      .select("title, link, score, seen_at")
+      .in("feed_id", feedIds)
+      .gte("seen_at", since)
+      .not("title", "is", null)
+      .order("score", { ascending: false, nullsFirst: false })
+      .order("seen_at", { ascending: false })
+      .limit(RECAP_LIMIT);
+
+    if (!recentItems || recentItems.length === 0) {
+      return Response.json({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: `Rien de nouveau dans **${category.name}** ces ${RECAP_WINDOW_DAYS} derniers jours.`,
+        },
+      });
+    }
+
+    const color = hexToInt(category.color);
+    const embeds = recentItems.map((item, i) => ({
+      title: (
+        ((item.score ?? 0) >= HIGH_RELEVANCE_THRESHOLD ? "🔥 " : "") +
+        `${i + 1}. ${item.title}`
+      ).slice(0, 256),
+      url: item.link ?? undefined,
+      color,
+      timestamp: item.seen_at ?? undefined,
+    }));
+
+    return Response.json({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content: `**Récap ${category.name}** — ${recentItems.length} article(s) des ${RECAP_WINDOW_DAYS} derniers jours`,
+        embeds,
       },
     });
   }
