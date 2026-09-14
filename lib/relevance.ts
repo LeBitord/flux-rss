@@ -1,4 +1,5 @@
 import { generateObject } from "ai";
+import { google } from "@ai-sdk/google";
 import { z } from "zod";
 
 const scoreSchema = z.object({
@@ -27,9 +28,11 @@ export async function scoreRelevance(
     .map((item, i) => `${i}. ${item.title}${item.description ? ` — ${item.description}` : ""}`)
     .join("\n");
 
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) return fallback;
+
   try {
     const { object } = await generateObject({
-      model: "anthropic/claude-haiku-4.5",
+      model: google("gemini-3.5-flash-lite"),
       schema: scoreSchema,
       system:
         `Tu notes la pertinence d'articles pour quelqu'un qui suit la catégorie "${categoryName}". ` +
