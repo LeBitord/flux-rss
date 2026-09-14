@@ -58,12 +58,22 @@ export function EditCategoryDialog({ category }: { category: Category }) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`edit-cat-webhook-${category.id}`}>Webhook Discord</Label>
+              <Label htmlFor={`edit-cat-channel-${category.id}`}>ID du salon Discord</Label>
+              <Input
+                id={`edit-cat-channel-${category.id}`}
+                name="discord_channel_id"
+                defaultValue={category.discord_channel_id ?? ""}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`edit-cat-webhook-${category.id}`}>
+                Webhook Discord (legacy, facultatif)
+              </Label>
               <Input
                 id={`edit-cat-webhook-${category.id}`}
                 name="discord_webhook_url"
-                defaultValue={category.discord_webhook_url}
-                required
+                defaultValue={category.discord_webhook_url ?? ""}
               />
             </div>
             <div className="space-y-2">

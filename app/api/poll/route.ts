@@ -2,12 +2,14 @@ import { timingSafeEqual } from "node:crypto";
 import Parser from "rss-parser";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { Category, Feed } from "@/lib/types";
-import { assertPublicHttpUrl, isValidDiscordWebhookUrl } from "@/lib/url-safety";
+import { assertPublicHttpUrl } from "@/lib/url-safety";
 import { scoreRelevance } from "@/lib/relevance";
+import { sendBotMessage, type DiscordActionRow, type DiscordButton } from "@/lib/discord-bot";
 
 export const maxDuration = 300;
 
 type NewItem = {
+  seenItemId: string;
   title: string;
   link: string;
   feedName: string;
@@ -16,9 +18,11 @@ type NewItem = {
   imageUrl?: string;
   publishedAt?: string;
   score?: number;
+  topics?: string[];
 };
 
 const HIGH_RELEVANCE_THRESHOLD = 8;
+const MAX_FEEDBACK_BUTTONS = 5; // Discord caps messages at 5 action rows; one row per fire article.
 
 const parser = new Parser({ timeout: 15000 });
 const MAX_EMBEDS_PER_MESSAGE = 10;
@@ -52,19 +56,26 @@ function extractDescription(item: { title?: string; contentSnippet?: string }): 
   return snippet.length > 200 ? `${snippet.slice(0, 200)}…` : snippet;
 }
 
-function matchesKeywords(
-  item: { title?: string; contentSnippet?: string; content?: string },
-  keywords: string | null,
-): boolean {
-  if (!keywords) return true;
-  const terms = keywords
+function parseTerms(raw: string | null): string[] {
+  return (raw ?? "")
     .split(",")
     .map((k) => k.trim().toLowerCase())
     .filter(Boolean);
-  if (terms.length === 0) return true;
+}
 
+function passesKeywordFilters(
+  item: { title?: string; contentSnippet?: string; content?: string },
+  keywords: string | null,
+  excludeKeywords: string | null,
+): boolean {
   const haystack = `${item.title ?? ""} ${item.contentSnippet ?? item.content ?? ""}`.toLowerCase();
-  return terms.some((term) => haystack.includes(term));
+
+  const excludeTerms = parseTerms(excludeKeywords);
+  if (excludeTerms.some((term) => haystack.includes(term))) return false;
+
+  const includeTerms = parseTerms(keywords);
+  if (includeTerms.length === 0) return true;
+  return includeTerms.some((term) => haystack.includes(term));
 }
 
 function isAuthorizedCronRequest(req: Request): boolean {
@@ -79,58 +90,65 @@ function isAuthorizedCronRequest(req: Request): boolean {
   return timingSafeEqual(a, b);
 }
 
-async function sendDiscordEmbeds(
-  webhookUrl: string,
+async function sendCategoryDigest(
   category: Category,
   items: NewItem[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!isValidDiscordWebhookUrl(webhookUrl)) {
-    return { ok: false, error: "URL de webhook Discord invalide" };
+  if (!category.discord_channel_id) {
+    return { ok: false, error: "Aucun salon Discord (discord_channel_id) configuré" };
   }
 
   const color = hexToInt(category.color);
   const shown = items.slice(0, MAX_EMBEDS_PER_MESSAGE);
   const overflow = items.length - shown.length;
 
-  const embeds = shown.map((item) => ({
-    title: (
-      (item.score ?? 0) >= HIGH_RELEVANCE_THRESHOLD ? `🔥 ${item.title}` : item.title
-    ).slice(0, 256),
-    url: item.link,
-    color,
-    description: item.description,
-    author: { name: item.feedName, icon_url: item.feedIconUrl },
-    timestamp: item.publishedAt,
-    thumbnail: item.imageUrl ? { url: item.imageUrl } : undefined,
+  const embeds = shown.map((item, i) => {
+    const isFire = (item.score ?? 0) >= HIGH_RELEVANCE_THRESHOLD;
+    const prefix = isFire ? `🔥 ${i + 1}.` : `${i + 1}.`;
+    return {
+      title: `${prefix} ${item.title}`.slice(0, 256),
+      url: item.link,
+      color,
+      description: item.description,
+      author: { name: item.feedName, icon_url: item.feedIconUrl },
+      timestamp: item.publishedAt,
+      thumbnail: item.imageUrl ? { url: item.imageUrl } : undefined,
+    };
+  });
+
+  const fireItems = shown
+    .map((item, i) => ({ item, position: i + 1 }))
+    .filter(({ item }) => (item.score ?? 0) >= HIGH_RELEVANCE_THRESHOLD)
+    .slice(0, MAX_FEEDBACK_BUTTONS);
+
+  const components: DiscordActionRow[] = fireItems.map(({ item, position }) => ({
+    type: 1,
+    components: [
+      {
+        type: 2,
+        style: 3,
+        label: `👍 #${position}`,
+        custom_id: `fb:up:${item.seenItemId}`,
+      } satisfies DiscordButton,
+      {
+        type: 2,
+        style: 4,
+        label: `👎 #${position}`,
+        custom_id: `fb:down:${item.seenItemId}`,
+      } satisfies DiscordButton,
+    ],
   }));
 
   const content =
     `**${category.name}** — ${items.length} nouvel(le)(s) article(s)` +
     (overflow > 0 ? `\n…et ${overflow} autre(s) non affiché(s).` : "");
 
-  try {
-    const res = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, embeds }),
-    });
-
-    if (!res.ok) {
-      return { ok: false, error: `Discord a répondu ${res.status}` };
-    }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
+  return sendBotMessage(category.discord_channel_id, { content, embeds, components });
 }
 
 async function sendFailureAlert(errors: { feed: string; error: string }[]) {
   const webhookUrl = process.env.ALERTS_DISCORD_WEBHOOK_URL;
   if (!webhookUrl || errors.length === 0) return;
-  if (!isValidDiscordWebhookUrl(webhookUrl)) {
-    console.error("Invalid ALERTS_DISCORD_WEBHOOK_URL");
-    return;
-  }
 
   const lines = errors.slice(0, 15).map((e) => `• **${e.feed}** — ${e.error}`);
   const overflow = errors.length - 15;
@@ -204,28 +222,38 @@ export async function GET(req: Request) {
       const { data: inserted, error: insertError } = await db
         .from("seen_items")
         .upsert(rowsToInsert, { onConflict: "feed_id,guid", ignoreDuplicates: true })
-        .select("guid");
+        .select("id, guid");
 
       if (insertError) {
         errors.push({ feed: feed.name, error: insertError.message });
         continue;
       }
 
-      const insertedGuids = new Set((inserted ?? []).map((row) => row.guid as string));
-      const fresh = dedup.filter((item) =>
-        insertedGuids.has(item.guid ?? item.link ?? item.title ?? ""),
+      const insertedIdByGuid = new Map(
+        (inserted ?? []).map((row) => [row.guid as string, row.id as string]),
       );
+      const fresh = dedup
+        .map((item) => ({
+          item,
+          seenItemId: insertedIdByGuid.get(item.guid ?? item.link ?? item.title ?? ""),
+        }))
+        .filter((x): x is { item: (typeof dedup)[number]; seenItemId: string } =>
+          Boolean(x.seenItemId),
+        );
 
       if (fresh.length === 0) continue;
 
-      // All fresh items are recorded as seen above regardless of the keyword filter below —
-      // only whether they trigger a Discord notification depends on matching the feed's keywords.
-      const notify = fresh.filter((item) => matchesKeywords(item, feed.keywords));
+      // All fresh items are recorded as seen above regardless of the keyword filters below —
+      // only whether they trigger a Discord notification depends on matching them.
+      const notify = fresh.filter(({ item }) =>
+        passesKeywordFilters(item, feed.keywords, feed.exclude_keywords),
+      );
       if (notify.length === 0) continue;
 
       const bucket = newItemsByCategory.get(feed.category_id) ?? [];
-      for (const item of notify) {
+      for (const { item, seenItemId } of notify) {
         bucket.push({
+          seenItemId,
           title: item.title ?? "(sans titre)",
           link: item.link ?? feed.url,
           feedName: feed.name,
@@ -251,13 +279,26 @@ export async function GET(req: Request) {
 
     // Score with a fast/cheap model and sort highest-first, so if there are more
     // items than MAX_EMBEDS_PER_MESSAGE, the most important ones are the ones kept.
-    const scores = await scoreRelevance(category.name, category.relevance_context, items);
+    const results = await scoreRelevance(category.name, category.relevance_context, items);
     items.forEach((item, i) => {
-      item.score = scores[i];
+      item.score = results[i].score;
+      item.topics = results[i].topics;
     });
     items.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
-    const result = await sendDiscordEmbeds(category.discord_webhook_url, category, items);
+    // Persist extracted topics so the feedback buttons can look them up on click.
+    await Promise.all(
+      items
+        .filter((item) => item.topics && item.topics.length > 0)
+        .map((item) =>
+          db
+            .from("seen_items")
+            .update({ topics: item.topics!.join(", ") })
+            .eq("id", item.seenItemId),
+        ),
+    );
+
+    const result = await sendCategoryDigest(category, items);
     if (!result.ok) {
       errors.push({ feed: `catégorie ${category.name}`, error: result.error });
       continue;

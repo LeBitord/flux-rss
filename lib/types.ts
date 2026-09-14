@@ -2,6 +2,7 @@ export type Category = {
   id: string;
   name: string;
   discord_webhook_url: string;
+  discord_channel_id: string | null;
   color: string;
   relevance_context: string | null;
   created_at: string;
@@ -14,5 +15,6 @@ export type Feed = {
   url: string;
   active: boolean;
   keywords: string | null;
+  exclude_keywords: string | null;
   created_at: string;
 };

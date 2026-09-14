@@ -7,22 +7,28 @@ const scoreSchema = z.object({
     z.object({
       index: z.number().int(),
       score: z.number().min(1).max(10),
+      topics: z
+        .array(z.string())
+        .max(3)
+        .describe("1 à 3 mots-clés courts représentant le sujet précis de cet article"),
     }),
   ),
 });
 
-const DEFAULT_SCORE = 5;
+export type RelevanceResult = { score: number; topics: string[] };
 
-// Scores each article 1-10 for a given category's audience, using a fast/cheap model.
-// Returns an array aligned with `items` (same length, same order) — never throws,
-// falls back to a neutral score for everything on any failure so a bad LLM call
-// never blocks a digest from going out.
+const DEFAULT_RESULT: RelevanceResult = { score: 5, topics: [] };
+
+// Scores each article 1-10 for a given category's audience and extracts short topic
+// keywords, using a fast/cheap model. Returns an array aligned with `items` (same
+// length, same order) — never throws, falls back to a neutral result for everything
+// on any failure so a bad LLM call never blocks a digest from going out.
 export async function scoreRelevance(
   categoryName: string,
   relevanceContext: string | null,
   items: { title: string; description?: string }[],
-): Promise<number[]> {
-  const fallback = new Array(items.length).fill(DEFAULT_SCORE) as number[];
+): Promise<RelevanceResult[]> {
+  const fallback = items.map(() => ({ ...DEFAULT_RESULT })) as RelevanceResult[];
   if (items.length === 0) return fallback;
 
   const list = items
@@ -44,15 +50,19 @@ export async function scoreRelevance(
         `Score de 1 (anecdotique, sans grand intérêt pour cette personne) à 10 (majeur, à lire en priorité pour elle). ` +
         `${personalContext}` +
         `Note en fonction de CES priorités précises, pas d'une importance générique du sujet — un article qui touche ` +
-        `directement ce qui est décrit ci-dessus vaut plus qu'une actu générale du secteur, même si celle-ci fait plus de bruit.`,
+        `directement ce qui est décrit ci-dessus vaut plus qu'une actu générale du secteur, même si celle-ci fait plus de bruit. ` +
+        `Pour chaque article, donne aussi 1 à 3 mots-clés courts (noms propres, thèmes précis) qui le résument — ` +
+        `ils serviront à affiner automatiquement les filtres si l'utilisateur réagit à l'article.`,
       prompt: `Articles à noter (un par ligne, numérotés à partir de 0) :\n${list}`,
     });
 
-    const scores = [...fallback];
+    const results = [...fallback];
     for (const s of object.scores) {
-      if (s.index >= 0 && s.index < items.length) scores[s.index] = s.score;
+      if (s.index >= 0 && s.index < items.length) {
+        results[s.index] = { score: s.score, topics: s.topics };
+      }
     }
-    return scores;
+    return results;
   } catch (err) {
     console.error("Relevance scoring failed:", err);
     return fallback;

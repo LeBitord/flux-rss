@@ -46,12 +46,24 @@ export function NewCategoryDialog() {
               <Input id="cat-name" name="name" placeholder="finance" required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cat-webhook">Webhook Discord</Label>
+              <Label htmlFor="cat-channel">ID du salon Discord</Label>
+              <Input
+                id="cat-channel"
+                name="discord_channel_id"
+                placeholder="1534891308987060496"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Mode développeur Discord → clic droit sur le salon → Copier l&apos;ID du salon.
+                Le bot doit y avoir accès.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cat-webhook">Webhook Discord (legacy, facultatif)</Label>
               <Input
                 id="cat-webhook"
                 name="discord_webhook_url"
                 placeholder="https://discord.com/api/webhooks/..."
-                required
               />
             </div>
             <div className="space-y-2">

@@ -45,14 +45,15 @@ export async function createCategory(formData: FormData) {
   await requireAdminSession();
 
   const name = String(formData.get("name") ?? "").trim();
+  const discordChannelId = String(formData.get("discord_channel_id") ?? "").trim();
   const discordWebhookUrl = String(formData.get("discord_webhook_url") ?? "").trim();
   const color = String(formData.get("color") ?? "#5865F2").trim();
   const relevanceContext = String(formData.get("relevance_context") ?? "").trim();
 
-  if (!name || !discordWebhookUrl) {
-    throw new Error("Nom et webhook Discord requis");
+  if (!name || !discordChannelId) {
+    throw new Error("Nom et ID de salon Discord requis");
   }
-  if (!isValidDiscordWebhookUrl(discordWebhookUrl)) {
+  if (discordWebhookUrl && !isValidDiscordWebhookUrl(discordWebhookUrl)) {
     throw new Error("URL de webhook Discord invalide");
   }
 
@@ -60,7 +61,8 @@ export async function createCategory(formData: FormData) {
     .from("categories")
     .insert({
       name,
-      discord_webhook_url: discordWebhookUrl,
+      discord_channel_id: discordChannelId,
+      discord_webhook_url: discordWebhookUrl || null,
       color,
       relevance_context: relevanceContext || null,
     });
@@ -75,14 +77,15 @@ export async function updateCategory(formData: FormData) {
 
   const id = String(formData.get("id") ?? "");
   const name = String(formData.get("name") ?? "").trim();
+  const discordChannelId = String(formData.get("discord_channel_id") ?? "").trim();
   const discordWebhookUrl = String(formData.get("discord_webhook_url") ?? "").trim();
   const color = String(formData.get("color") ?? "#5865F2").trim();
   const relevanceContext = String(formData.get("relevance_context") ?? "").trim();
 
-  if (!id || !name || !discordWebhookUrl) {
-    throw new Error("Nom et webhook Discord requis");
+  if (!id || !name || !discordChannelId) {
+    throw new Error("Nom et ID de salon Discord requis");
   }
-  if (!isValidDiscordWebhookUrl(discordWebhookUrl)) {
+  if (discordWebhookUrl && !isValidDiscordWebhookUrl(discordWebhookUrl)) {
     throw new Error("URL de webhook Discord invalide");
   }
 
@@ -90,7 +93,8 @@ export async function updateCategory(formData: FormData) {
     .from("categories")
     .update({
       name,
-      discord_webhook_url: discordWebhookUrl,
+      discord_channel_id: discordChannelId,
+      discord_webhook_url: discordWebhookUrl || null,
       color,
       relevance_context: relevanceContext || null,
     })
