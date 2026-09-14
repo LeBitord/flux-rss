@@ -48,7 +48,9 @@ export async function getStockQuotes(tickers: string[]): Promise<StockQuote[]> {
 }
 
 export function formatStockLine(quote: StockQuote): string {
-  const arrow = quote.change >= 0 ? "📈" : "📉";
+  // Plain arrows instead of 📈/📉 — the chart emoji render ambiguously (direction is hard
+  // to tell at a glance) in some Discord clients' emoji font.
+  const arrow = quote.change >= 0 ? "⬆️" : "⬇️";
   const sign = quote.change >= 0 ? "+" : "";
   return `${arrow} **${quote.ticker}** : ${quote.price.toFixed(2)} € (${sign}${quote.change.toFixed(2)} / ${sign}${quote.changePercent.toFixed(2)}%)`;
 }
