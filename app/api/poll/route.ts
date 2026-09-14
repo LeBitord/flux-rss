@@ -5,6 +5,7 @@ import type { Category, Feed } from "@/lib/types";
 import { assertPublicHttpUrl } from "@/lib/url-safety";
 import { scoreRelevance } from "@/lib/relevance";
 import { sendBotMessage, type DiscordActionRow, type DiscordButton } from "@/lib/discord-bot";
+import { getStockQuotes, formatStockLine } from "@/lib/stocks";
 
 export const maxDuration = 300;
 
@@ -93,6 +94,7 @@ function isAuthorizedCronRequest(req: Request): boolean {
 async function sendCategoryDigest(
   category: Category,
   items: NewItem[],
+  stockLines: string[] = [],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!category.discord_channel_id) {
     return { ok: false, error: "Aucun salon Discord (discord_channel_id) configuré" };
@@ -140,10 +142,22 @@ async function sendCategoryDigest(
   }));
 
   const content =
+    (stockLines.length > 0 ? `${stockLines.join("\n")}\n\n` : "") +
     `**${category.name}** — ${items.length} nouvel(le)(s) article(s)` +
     (overflow > 0 ? `\n…et ${overflow} autre(s) non affiché(s).` : "");
 
   return sendBotMessage(category.discord_channel_id, { content, embeds, components });
+}
+
+async function sendStandaloneStockMessage(
+  category: Category,
+  stockLines: string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!category.discord_channel_id) {
+    return { ok: false, error: "Aucun salon Discord (discord_channel_id) configuré" };
+  }
+  const content = `**${category.name}** — cours du jour\n${stockLines.join("\n")}`;
+  return sendBotMessage(category.discord_channel_id, { content });
 }
 
 async function sendFailureAlert(errors: { feed: string; error: string }[]) {
@@ -274,6 +288,28 @@ export async function GET(req: Request) {
     }
   }
 
+  // Group any feeds carrying a stock_ticker by category, so a category's digest can be
+  // prefixed with the day's prices — or, if no news fired, sent as a standalone message.
+  const tickersByCategory = new Map<string, string[]>();
+  for (const feed of feedList) {
+    if (!feed.stock_ticker) continue;
+    const bucket = tickersByCategory.get(feed.category_id) ?? [];
+    if (!bucket.includes(feed.stock_ticker)) bucket.push(feed.stock_ticker);
+    tickersByCategory.set(feed.category_id, bucket);
+  }
+  const stockLinesByCategory = new Map<string, string[]>();
+  for (const [categoryId, tickers] of tickersByCategory) {
+    try {
+      const quotes = await getStockQuotes(tickers);
+      if (quotes.length > 0) stockLinesByCategory.set(categoryId, quotes.map(formatStockLine));
+    } catch (err) {
+      errors.push({
+        feed: "cours de bourse",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   let digestsSent = 0;
   for (const [categoryId, items] of newItemsByCategory) {
     const category = categoryById.get(categoryId);
@@ -302,12 +338,24 @@ export async function GET(req: Request) {
       ),
     );
 
-    const result = await sendCategoryDigest(category, items);
+    const stockLines = stockLinesByCategory.get(categoryId) ?? [];
+    const result = await sendCategoryDigest(category, items, stockLines);
     if (!result.ok) {
       errors.push({ feed: `catégorie ${category.name}`, error: result.error });
       continue;
     }
     digestsSent += 1;
+    stockLinesByCategory.delete(categoryId); // included in the digest above — skip the standalone send
+  }
+
+  // Categories with tickers but no news digest today still get their prices.
+  for (const [categoryId, stockLines] of stockLinesByCategory) {
+    const category = categoryById.get(categoryId);
+    if (!category) continue;
+    const result = await sendStandaloneStockMessage(category, stockLines);
+    if (!result.ok) {
+      errors.push({ feed: `cours ${category.name}`, error: result.error });
+    }
   }
 
   await sendFailureAlert(errors);

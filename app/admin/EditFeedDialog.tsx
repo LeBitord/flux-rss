@@ -77,6 +77,20 @@ export function EditFeedDialog({ feed }: { feed: Feed }) {
                 Séparés par des virgules. Laisser vide pour tout recevoir.
               </p>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor={`edit-feed-stock-ticker-${feed.id}`}>
+                Ticker boursier (facultatif)
+              </Label>
+              <Input
+                id={`edit-feed-stock-ticker-${feed.id}`}
+                name="stock_ticker"
+                defaultValue={feed.stock_ticker ?? ""}
+                placeholder="AI.PA"
+              />
+              <p className="text-xs text-muted-foreground">
+                Symbole Alpha Vantage (ex. AI.PA pour Air Liquide à Paris).
+              </p>
+            </div>
           </div>
 
           <DialogFooter>

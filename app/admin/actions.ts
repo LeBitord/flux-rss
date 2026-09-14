@@ -124,6 +124,7 @@ export async function createFeed(formData: FormData) {
   const url = String(formData.get("url") ?? "").trim();
   const categoryId = String(formData.get("category_id") ?? "");
   const keywords = String(formData.get("keywords") ?? "").trim();
+  const stockTicker = String(formData.get("stock_ticker") ?? "").trim().toUpperCase();
 
   if (!name || !url || !categoryId) {
     throw new Error("Nom, URL et catégorie requis");
@@ -132,7 +133,13 @@ export async function createFeed(formData: FormData) {
 
   const { error } = await supabaseAdmin()
     .from("feeds")
-    .insert({ name, url, category_id: categoryId, keywords: keywords || null });
+    .insert({
+      name,
+      url,
+      category_id: categoryId,
+      keywords: keywords || null,
+      stock_ticker: stockTicker || null,
+    });
 
   if (error) throw new Error(error.message);
 
@@ -146,6 +153,7 @@ export async function updateFeed(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const url = String(formData.get("url") ?? "").trim();
   const keywords = String(formData.get("keywords") ?? "").trim();
+  const stockTicker = String(formData.get("stock_ticker") ?? "").trim().toUpperCase();
 
   if (!id || !name || !url) {
     throw new Error("Nom et URL requis");
@@ -154,7 +162,7 @@ export async function updateFeed(formData: FormData) {
 
   const { error } = await supabaseAdmin()
     .from("feeds")
-    .update({ name, url, keywords: keywords || null })
+    .update({ name, url, keywords: keywords || null, stock_ticker: stockTicker || null })
     .eq("id", id);
 
   if (error) throw new Error(error.message);

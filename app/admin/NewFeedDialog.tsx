@@ -64,6 +64,14 @@ export function NewFeedDialog({ categoryId }: { categoryId: string }) {
                 (titre ou résumé) seront notifiés. Laisser vide pour tout recevoir.
               </p>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="feed-stock-ticker">Ticker boursier (facultatif)</Label>
+              <Input id="feed-stock-ticker" name="stock_ticker" placeholder="AI.PA" />
+              <p className="text-xs text-muted-foreground">
+                Symbole Alpha Vantage (ex. AI.PA pour Air Liquide à Paris). Ajoute le cours du
+                jour au digest de cette catégorie.
+              </p>
+            </div>
           </div>
 
           <DialogFooter>

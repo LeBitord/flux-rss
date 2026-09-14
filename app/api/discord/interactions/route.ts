@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import {
   InteractionResponseFlags,
   InteractionResponseType,
@@ -5,6 +6,9 @@ import {
   verifyKey,
 } from "discord-interactions";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { getStockQuotes, formatStockLine } from "@/lib/stocks";
+
+const DISCORD_API = "https://discord.com/api/v10";
 
 const RECAP_WINDOW_DAYS = 3;
 const RECAP_LIMIT = 10;
@@ -194,6 +198,74 @@ export async function POST(req: Request) {
         content: `**Récap ${category.name}** — ${recentItems.length} article(s) des ${RECAP_WINDOW_DAYS} derniers jours`,
         embeds,
       },
+    });
+  }
+
+  if (body.type === InteractionType.APPLICATION_COMMAND && body.data?.name === "cours") {
+    const channelId: string | undefined = body.channel_id;
+    const applicationId: string | undefined = body.application_id;
+    const token: string | undefined = body.token;
+    const db = supabaseAdmin();
+
+    const { data: category } = await db
+      .from("categories")
+      .select("id, name")
+      .eq("discord_channel_id", channelId)
+      .maybeSingle();
+
+    if (!category) {
+      return Response.json({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: "Ce salon n'est associé à aucune catégorie flux-rss.",
+          flags: InteractionResponseFlags.EPHEMERAL,
+        },
+      });
+    }
+
+    const { data: feedsInCategory } = await db
+      .from("feeds")
+      .select("stock_ticker")
+      .eq("category_id", category.id)
+      .not("stock_ticker", "is", null);
+    const tickers = [...new Set((feedsInCategory ?? []).map((f) => f.stock_ticker as string))];
+
+    if (tickers.length === 0) {
+      return Response.json({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: `Aucun ticker boursier configuré pour **${category.name}**.`,
+          flags: InteractionResponseFlags.EPHEMERAL,
+        },
+      });
+    }
+
+    // Fetching quotes (rate-limited to ~1/sec) can exceed Discord's 3s interaction window —
+    // defer immediately, then patch the real content in once the fetch resolves.
+    if (applicationId && token) {
+      after(async () => {
+        const quotes = await getStockQuotes(tickers);
+        const content =
+          quotes.length > 0
+            ? quotes.map(formatStockLine).join("\n")
+            : "Impossible de récupérer les cours pour le moment.";
+        try {
+          await fetch(
+            `${DISCORD_API}/webhooks/${applicationId}/${token}/messages/@original`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content }),
+            },
+          );
+        } catch (err) {
+          console.error("Failed to patch /cours follow-up:", err);
+        }
+      });
+    }
+
+    return Response.json({
+      type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
     });
   }
 
