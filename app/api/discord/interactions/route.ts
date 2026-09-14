@@ -205,50 +205,48 @@ export async function POST(req: Request) {
     const channelId: string | undefined = body.channel_id;
     const applicationId: string | undefined = body.application_id;
     const token: string | undefined = body.token;
-    const db = supabaseAdmin();
 
-    const { data: category } = await db
-      .from("categories")
-      .select("id, name")
-      .eq("discord_channel_id", channelId)
-      .maybeSingle();
-
-    if (!category) {
-      return Response.json({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content: "Ce salon n'est associé à aucune catégorie flux-rss.",
-          flags: InteractionResponseFlags.EPHEMERAL,
-        },
-      });
-    }
-
-    const { data: feedsInCategory } = await db
-      .from("feeds")
-      .select("stock_ticker")
-      .eq("category_id", category.id)
-      .not("stock_ticker", "is", null);
-    const tickers = [...new Set((feedsInCategory ?? []).map((f) => f.stock_ticker as string))];
-
-    if (tickers.length === 0) {
-      return Response.json({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content: `Aucun ticker boursier configuré pour **${category.name}**.`,
-          flags: InteractionResponseFlags.EPHEMERAL,
-        },
-      });
-    }
-
-    // Fetching quotes (rate-limited to ~1/sec) can exceed Discord's 3s interaction window —
-    // defer immediately, then patch the real content in once the fetch resolves.
+    // Discord requires an ack within 3s. Even the category/ticker lookup can blow that
+    // budget on a cold start, so defer FIRST and do every bit of work — DB included — in
+    // the background, then patch the real content in once it's ready.
     if (applicationId && token) {
       after(async () => {
-        const quotes = await getStockQuotes(tickers);
-        const content =
-          quotes.length > 0
-            ? quotes.map(formatStockLine).join("\n")
-            : "Impossible de récupérer les cours pour le moment.";
+        const db = supabaseAdmin();
+        let content: string;
+        try {
+          const { data: category } = await db
+            .from("categories")
+            .select("id, name")
+            .eq("discord_channel_id", channelId)
+            .maybeSingle();
+
+          if (!category) {
+            content = "Ce salon n'est associé à aucune catégorie flux-rss.";
+          } else {
+            const { data: feedsInCategory } = await db
+              .from("feeds")
+              .select("stock_ticker")
+              .eq("category_id", category.id)
+              .not("stock_ticker", "is", null);
+            const tickers = [
+              ...new Set((feedsInCategory ?? []).map((f) => f.stock_ticker as string)),
+            ];
+
+            if (tickers.length === 0) {
+              content = `Aucun ticker boursier configuré pour **${category.name}**.`;
+            } else {
+              const quotes = await getStockQuotes(tickers);
+              content =
+                quotes.length > 0
+                  ? quotes.map(formatStockLine).join("\n")
+                  : "Impossible de récupérer les cours pour le moment.";
+            }
+          }
+        } catch (err) {
+          console.error("Failed to resolve /cours follow-up:", err);
+          content = "Une erreur est survenue.";
+        }
+
         try {
           await fetch(
             `${DISCORD_API}/webhooks/${applicationId}/${token}/messages/@original`,
