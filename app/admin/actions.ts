@@ -47,6 +47,7 @@ export async function createCategory(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const discordWebhookUrl = String(formData.get("discord_webhook_url") ?? "").trim();
   const color = String(formData.get("color") ?? "#5865F2").trim();
+  const relevanceContext = String(formData.get("relevance_context") ?? "").trim();
 
   if (!name || !discordWebhookUrl) {
     throw new Error("Nom et webhook Discord requis");
@@ -57,7 +58,12 @@ export async function createCategory(formData: FormData) {
 
   const { error } = await supabaseAdmin()
     .from("categories")
-    .insert({ name, discord_webhook_url: discordWebhookUrl, color });
+    .insert({
+      name,
+      discord_webhook_url: discordWebhookUrl,
+      color,
+      relevance_context: relevanceContext || null,
+    });
 
   if (error) throw new Error(error.message);
 
@@ -71,6 +77,7 @@ export async function updateCategory(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const discordWebhookUrl = String(formData.get("discord_webhook_url") ?? "").trim();
   const color = String(formData.get("color") ?? "#5865F2").trim();
+  const relevanceContext = String(formData.get("relevance_context") ?? "").trim();
 
   if (!id || !name || !discordWebhookUrl) {
     throw new Error("Nom et webhook Discord requis");
@@ -81,7 +88,12 @@ export async function updateCategory(formData: FormData) {
 
   const { error } = await supabaseAdmin()
     .from("categories")
-    .update({ name, discord_webhook_url: discordWebhookUrl, color })
+    .update({
+      name,
+      discord_webhook_url: discordWebhookUrl,
+      color,
+      relevance_context: relevanceContext || null,
+    })
     .eq("id", id);
 
   if (error) throw new Error(error.message);

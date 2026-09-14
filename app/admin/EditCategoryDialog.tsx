@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -74,6 +75,22 @@ export function EditCategoryDialog({ category }: { category: Category }) {
                 defaultValue={category.color}
                 className="h-8 w-12 rounded border border-border bg-transparent p-0.5"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`edit-cat-relevance-${category.id}`}>
+                Ce qui compte pour vous ici (facultatif)
+              </Label>
+              <Textarea
+                id={`edit-cat-relevance-${category.id}`}
+                name="relevance_context"
+                defaultValue={category.relevance_context ?? ""}
+                placeholder="Ex : je détiens cette action, je veux surtout les résultats et l'export"
+                rows={3}
+              />
+              <p className="text-xs text-muted-foreground">
+                Utilisé par le score de pertinence IA pour juger ce qui compte vraiment pour
+                vous, pas juste l&apos;importance générique du sujet.
+              </p>
             </div>
           </div>
 

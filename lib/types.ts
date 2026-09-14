@@ -3,6 +3,7 @@ export type Category = {
   name: string;
   discord_webhook_url: string;
   color: string;
+  relevance_context: string | null;
   created_at: string;
 };
 

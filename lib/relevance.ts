@@ -19,6 +19,7 @@ const DEFAULT_SCORE = 5;
 // never blocks a digest from going out.
 export async function scoreRelevance(
   categoryName: string,
+  relevanceContext: string | null,
   items: { title: string; description?: string }[],
 ): Promise<number[]> {
   const fallback = new Array(items.length).fill(DEFAULT_SCORE) as number[];
@@ -30,14 +31,20 @@ export async function scoreRelevance(
 
   if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) return fallback;
 
+  const personalContext = relevanceContext
+    ? `Ce que cette personne cherche précisément dans "${categoryName}" : ${relevanceContext}\n`
+    : "";
+
   try {
     const { object } = await generateObject({
       model: google("gemini-3.5-flash-lite"),
       schema: scoreSchema,
       system:
         `Tu notes la pertinence d'articles pour quelqu'un qui suit la catégorie "${categoryName}". ` +
-        `Score de 1 (anecdotique, sans grand intérêt) à 10 (majeur, à lire en priorité). ` +
-        `Un score élevé signifie un vrai impact ou une nouveauté significative, pas juste une mention en passant.`,
+        `Score de 1 (anecdotique, sans grand intérêt pour cette personne) à 10 (majeur, à lire en priorité pour elle). ` +
+        `${personalContext}` +
+        `Note en fonction de CES priorités précises, pas d'une importance générique du sujet — un article qui touche ` +
+        `directement ce qui est décrit ci-dessus vaut plus qu'une actu générale du secteur, même si celle-ci fait plus de bruit.`,
       prompt: `Articles à noter (un par ligne, numérotés à partir de 0) :\n${list}`,
     });
 

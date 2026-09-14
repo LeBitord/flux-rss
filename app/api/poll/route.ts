@@ -251,7 +251,7 @@ export async function GET(req: Request) {
 
     // Score with a fast/cheap model and sort highest-first, so if there are more
     // items than MAX_EMBEDS_PER_MESSAGE, the most important ones are the ones kept.
-    const scores = await scoreRelevance(category.name, items);
+    const scores = await scoreRelevance(category.name, category.relevance_context, items);
     items.forEach((item, i) => {
       item.score = scores[i];
     });

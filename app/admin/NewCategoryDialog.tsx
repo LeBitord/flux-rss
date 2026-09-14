@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -67,6 +68,19 @@ export function NewCategoryDialog() {
                   Couleur de la barre latérale des messages Discord.
                 </span>
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cat-relevance">Ce qui compte pour vous ici (facultatif)</Label>
+              <Textarea
+                id="cat-relevance"
+                name="relevance_context"
+                placeholder="Ex : je détiens cette action, je veux surtout les résultats et l'export"
+                rows={3}
+              />
+              <p className="text-xs text-muted-foreground">
+                Utilisé par le score de pertinence IA pour juger ce qui compte vraiment pour
+                vous, pas juste l&apos;importance générique du sujet.
+              </p>
             </div>
           </div>
 
