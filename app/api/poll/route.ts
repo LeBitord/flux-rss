@@ -10,6 +10,8 @@ type NewItem = {
   title: string;
   link: string;
   feedName: string;
+  feedIconUrl: string;
+  description?: string;
   imageUrl?: string;
   publishedAt?: string;
 };
@@ -29,6 +31,21 @@ function isRecent(item: { isoDate?: string; pubDate?: string }): boolean {
 function hexToInt(hex: string): number {
   const parsed = parseInt(hex.replace("#", ""), 16);
   return Number.isNaN(parsed) ? 0x5865f2 : parsed;
+}
+
+function faviconUrl(feedUrl: string): string {
+  const hostname = new URL(feedUrl).hostname;
+  return `https://www.google.com/s2/favicons?domain=${hostname}&sz=64`;
+}
+
+// Google News' own contentSnippet is just the title repeated (plus the source name) —
+// not a real summary. Detect and drop that case; keep it for feeds with genuine content.
+function extractDescription(item: { title?: string; contentSnippet?: string }): string | undefined {
+  const snippet = item.contentSnippet?.trim();
+  if (!snippet) return undefined;
+  const title = item.title?.trim() ?? "";
+  if (title && snippet.startsWith(title.slice(0, Math.min(30, title.length)))) return undefined;
+  return snippet.length > 200 ? `${snippet.slice(0, 200)}…` : snippet;
 }
 
 function matchesKeywords(
@@ -75,7 +92,8 @@ async function sendDiscordEmbeds(
     title: item.title.slice(0, 256),
     url: item.link,
     color,
-    footer: { text: item.feedName },
+    description: item.description,
+    author: { name: item.feedName, icon_url: item.feedIconUrl },
     timestamp: item.publishedAt,
     thumbnail: item.imageUrl ? { url: item.imageUrl } : undefined,
   }));
@@ -205,6 +223,8 @@ export async function GET(req: Request) {
           title: item.title ?? "(sans titre)",
           link: item.link ?? feed.url,
           feedName: feed.name,
+          feedIconUrl: faviconUrl(feed.url),
+          description: extractDescription(item),
           imageUrl: item.enclosure?.url,
           publishedAt: item.isoDate ?? (item.pubDate ? new Date(item.pubDate).toISOString() : undefined),
         });
