@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { Category, Feed, StockPosition } from "@/lib/types";
 import { assertPublicHttpUrl } from "@/lib/url-safety";
 import { scoreRelevance } from "@/lib/relevance";
+import { generateBriefingSummary } from "@/lib/briefing";
 import { sendBotMessage, type DiscordActionRow, type DiscordButton } from "@/lib/discord-bot";
 import { getStockQuotes, formatStockLine } from "@/lib/stocks";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
@@ -337,11 +338,14 @@ export async function GET(req: Request) {
     tickersByCategory.set(position.category_id, bucket);
   }
   const stockLinesByCategory = new Map<string, string[]>();
+  const allStockLines: string[] = [];
   for (const [categoryId, tickers] of tickersByCategory) {
     try {
       const quotes = await getStockQuotes(tickers);
       if (quotes.length > 0) {
-        stockLinesByCategory.set(categoryId, quotes.map(formatStockLine));
+        const lines = quotes.map(formatStockLine);
+        stockLinesByCategory.set(categoryId, lines);
+        allStockLines.push(...lines);
 
         // Feeds the weekly position summary — no extra API calls, just persisting what
         // was already fetched for today's digest.
@@ -409,6 +413,38 @@ export async function GET(req: Request) {
     const result = await sendStandaloneStockMessage(category, stockLines);
     if (!result.ok) {
       errors.push({ feed: `cours ${category.name}`, error: result.error });
+    }
+  }
+
+  const briefingChannelId = process.env.BRIEFING_DISCORD_CHANNEL_ID;
+  if (briefingChannelId) {
+    const briefingCategories = [...newItemsByCategory.entries()]
+      .map(([categoryId, items]) => {
+        const category = categoryById.get(categoryId);
+        return category
+          ? { name: category.name, items: items.map((i) => ({ title: i.title, score: i.score })) }
+          : null;
+      })
+      .filter(
+        (c): c is { name: string; items: { title: string; score: number | undefined }[] } =>
+          c !== null,
+      );
+
+    const summary = await generateBriefingSummary(briefingCategories, allStockLines);
+    if (summary) {
+      const detail = briefingCategories.map((c) => `${c.name} (${c.items.length})`).join(" · ");
+      const dateLabel = new Date().toLocaleDateString("fr-FR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      });
+      const content =
+        `🗞️ **Briefing du ${dateLabel}**\n\n${summary}` +
+        (detail ? `\n\n_Détail : ${detail}_` : "");
+      const result = await sendBotMessage(briefingChannelId, { content });
+      if (!result.ok) {
+        errors.push({ feed: "briefing", error: result.error });
+      }
     }
   }
 
