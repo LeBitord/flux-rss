@@ -8,6 +8,7 @@ export type DiscordEmbed = {
   author?: { name: string; icon_url?: string };
   thumbnail?: { url: string };
   timestamp?: string;
+  fields?: { name: string; value: string; inline?: boolean }[];
 };
 
 export type DiscordButton = {

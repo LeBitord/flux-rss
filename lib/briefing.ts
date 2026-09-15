@@ -1,45 +1,66 @@
-import { generateText } from "ai";
+import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
+import { z } from "zod";
 
 export type BriefingCategory = {
   name: string;
-  items: { title: string; score?: number }[];
+  items: { title: string; description?: string; score?: number }[];
 };
 
-// Condensed cross-category synthesis for the morning briefing channel — separate from
-// scoreRelevance (which scores article-by-article) since this reads the already-scored
-// items and produces a few sentences of prose instead of structured data.
+export type BriefingSection = { category: string; summary: string };
+
+const sectionsSchema = z.object({
+  sections: z.array(
+    z.object({
+      category: z.string(),
+      summary: z
+        .string()
+        .describe(
+          "3 à 5 phrases substantielles : ce qui s'est passé, pourquoi ça compte, en citant les faits " +
+            "précis des articles (noms, chiffres, annonces) plutôt que de rester vague.",
+        ),
+    }),
+  ),
+});
+
+// One real paragraph per category (not a single blended sentence across everything) —
+// each section is grounded in that category's actual top-scored articles.
 export async function generateBriefingSummary(
   categories: BriefingCategory[],
-  stockLines: string[],
-): Promise<string | null> {
+): Promise<BriefingSection[] | null> {
   if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) return null;
-  if (categories.length === 0 && stockLines.length === 0) return null;
+  if (categories.length === 0) return null;
 
   const list = categories
     .map((c) => {
       const items = c.items
-        .slice(0, 8)
-        .map((item) => `- ${item.title}${item.score ? ` (score ${item.score}/10)` : ""}`)
+        .slice(0, 12)
+        .map(
+          (item, i) =>
+            `${i + 1}. ${item.title}${item.description ? ` — ${item.description}` : ""}` +
+            `${item.score ? ` [score ${item.score}/10]` : ""}`,
+        )
         .join("\n");
       return `### ${c.name}\n${items}`;
     })
     .join("\n\n");
 
-  const stockBlock = stockLines.length > 0 ? `\n\nCours du jour :\n${stockLines.join("\n")}` : "";
-
   try {
-    const { text } = await generateText({
+    const { object } = await generateObject({
       model: google("gemini-3.5-flash-lite"),
+      schema: sectionsSchema,
       system:
-        "Tu rédiges un briefing matinal condensé, en français, pour quelqu'un qui suit plusieurs " +
-        "catégories d'actualité (vidéosurveillance, tech, finance, rugby, basket). " +
-        "Résume en 4 à 6 phrases percutantes les points à retenir aujourd'hui, en priorisant ce qui a " +
-        "le score le plus élevé. Ton direct, factuel, pas de flatterie ni d'emojis en trop. " +
-        "Ne liste pas mécaniquement chaque catégorie — synthétise.",
-      prompt: `Articles du jour par catégorie :\n\n${list || "(aucun article aujourd'hui)"}${stockBlock}`,
+        "Tu rédiges le briefing matinal d'une personne qui suit plusieurs catégories d'actualité " +
+        "(vidéosurveillance, tech, finance, rugby, basket). Pour CHAQUE catégorie fournie, écris un " +
+        "paragraphe dense et concret (3 à 5 phrases) sur ce qu'il faut retenir aujourd'hui — priorise " +
+        "les articles au score le plus élevé, mais mentionne aussi les autres sujets notables s'il y en a. " +
+        "Cite les faits précis (noms propres, chiffres, annonces) au lieu de paraphraser vaguement. " +
+        "Une catégorie sans article marquant peut avoir un résumé plus court, mais ne l'invente pas. " +
+        "Ton direct et factuel, pas de flatterie, pas d'emojis.",
+      prompt: `Catégories et leurs articles du jour (numérotés, triés par score décroissant) :\n\n${list}`,
     });
-    return text.trim();
+
+    return object.sections;
   } catch (err) {
     console.error("Briefing summary generation failed:", err);
     return null;

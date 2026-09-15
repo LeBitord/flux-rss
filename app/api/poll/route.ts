@@ -422,26 +422,41 @@ export async function GET(req: Request) {
       .map(([categoryId, items]) => {
         const category = categoryById.get(categoryId);
         return category
-          ? { name: category.name, items: items.map((i) => ({ title: i.title, score: i.score })) }
+          ? {
+              name: category.name,
+              items: items.map((i) => ({
+                title: i.title,
+                description: i.description,
+                score: i.score,
+              })),
+            }
           : null;
       })
-      .filter(
-        (c): c is { name: string; items: { title: string; score: number | undefined }[] } =>
-          c !== null,
-      );
+      .filter((c) => c !== null);
 
-    const summary = await generateBriefingSummary(briefingCategories, allStockLines);
-    if (summary) {
-      const detail = briefingCategories.map((c) => `${c.name} (${c.items.length})`).join(" · ");
+    const sections = await generateBriefingSummary(briefingCategories);
+    if (sections && sections.length > 0) {
       const dateLabel = new Date().toLocaleDateString("fr-FR", {
         weekday: "long",
         day: "numeric",
         month: "long",
       });
-      const content =
-        `🗞️ **Briefing du ${dateLabel}**\n\n${summary}` +
-        (detail ? `\n\n_Détail : ${detail}_` : "");
-      const result = await sendBotMessage(briefingChannelId, { content });
+      const fields = sections.map((s) => ({
+        name: s.category.slice(0, 256),
+        value: s.summary.slice(0, 1024),
+      }));
+      if (allStockLines.length > 0) {
+        fields.push({ name: "💰 Cours du jour", value: allStockLines.join("\n").slice(0, 1024) });
+      }
+      const result = await sendBotMessage(briefingChannelId, {
+        embeds: [
+          {
+            title: `🗞️ Briefing du ${dateLabel}`,
+            color: 0x5865f2,
+            fields,
+          },
+        ],
+      });
       if (!result.ok) {
         errors.push({ feed: "briefing", error: result.error });
       }
