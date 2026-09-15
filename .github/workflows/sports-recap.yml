@@ -1,0 +1,16 @@
+name: Weekly sports recap
+
+on:
+  schedule:
+    # Monday 8:00 UTC — after the weekend's rugby/basketball rounds.
+    - cron: "0 8 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  recap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call sports-recap endpoint
+        run: |
+          curl -sf -X GET "https://flux-rss-fawn.vercel.app/api/sports-recap" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
