@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import type { Category, Feed } from "@/lib/types";
+import type { Category, Feed, StockPosition } from "@/lib/types";
 import { CategoryCard } from "./CategoryCard";
 import { NewCategoryDialog } from "./NewCategoryDialog";
 import { LogoutButton } from "./LogoutButton";
@@ -8,18 +8,26 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog";
 export default async function AdminPage() {
   const db = supabaseAdmin();
 
-  const [{ data: categories }, { data: feeds }] = await Promise.all([
+  const [{ data: categories }, { data: feeds }, { data: positions }] = await Promise.all([
     db.from("categories").select("*").order("name"),
     db.from("feeds").select("*").order("name"),
+    db.from("stock_positions").select("*").order("label"),
   ]);
 
   const categoryList = (categories ?? []) as Category[];
   const feedList = (feeds ?? []) as Feed[];
+  const positionList = (positions ?? []) as StockPosition[];
   const feedsByCategory = new Map<string, Feed[]>();
   for (const feed of feedList) {
     const bucket = feedsByCategory.get(feed.category_id) ?? [];
     bucket.push(feed);
     feedsByCategory.set(feed.category_id, bucket);
+  }
+  const positionsByCategory = new Map<string, StockPosition[]>();
+  for (const position of positionList) {
+    const bucket = positionsByCategory.get(position.category_id) ?? [];
+    bucket.push(position);
+    positionsByCategory.set(position.category_id, bucket);
   }
 
   return (
@@ -55,6 +63,7 @@ export default async function AdminPage() {
               key={category.id}
               category={category}
               feeds={feedsByCategory.get(category.id) ?? []}
+              positions={positionsByCategory.get(category.id) ?? []}
             />
           ))}
         </div>

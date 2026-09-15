@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,19 +29,23 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
-import type { Category, Feed } from "@/lib/types";
-import { deleteCategory, deleteFeed } from "./actions";
+import type { Category, Feed, StockPosition } from "@/lib/types";
+import { deleteCategory, deleteFeed, deletePosition } from "./actions";
 import { FeedActiveToggle } from "./FeedActiveToggle";
 import { NewFeedDialog } from "./NewFeedDialog";
 import { EditCategoryDialog } from "./EditCategoryDialog";
 import { EditFeedDialog } from "./EditFeedDialog";
+import { NewPositionDialog } from "./NewPositionDialog";
+import { EditPositionDialog } from "./EditPositionDialog";
 
 export function CategoryCard({
   category,
   feeds,
+  positions,
 }: {
   category: Category;
   feeds: Feed[];
+  positions: StockPosition[];
 }) {
   return (
     <Card>
@@ -149,10 +154,52 @@ export function CategoryCard({
             </TableBody>
           </Table>
         )}
+
+        {positions.length > 0 && (
+          <>
+            <Separator className="my-4" />
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Position</TableHead>
+                  <TableHead>Ticker</TableHead>
+                  <TableHead className="w-20"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {positions.map((position) => (
+                  <TableRow key={position.id}>
+                    <TableCell className="font-medium">{position.label}</TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">
+                      {position.ticker}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <EditPositionDialog position={position} />
+                        <form action={deletePosition}>
+                          <input type="hidden" name="id" value={position.id} />
+                          <Button
+                            type="submit"
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </form>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        )}
       </CardContent>
 
-      <CardFooter>
+      <CardFooter className="flex items-center gap-2">
         <NewFeedDialog categoryId={category.id} />
+        <NewPositionDialog categoryId={category.id} />
       </CardFooter>
     </Card>
   );

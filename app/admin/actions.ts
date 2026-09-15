@@ -124,7 +124,6 @@ export async function createFeed(formData: FormData) {
   const url = String(formData.get("url") ?? "").trim();
   const categoryId = String(formData.get("category_id") ?? "");
   const keywords = String(formData.get("keywords") ?? "").trim();
-  const stockTicker = String(formData.get("stock_ticker") ?? "").trim().toUpperCase();
 
   if (!name || !url || !categoryId) {
     throw new Error("Nom, URL et catégorie requis");
@@ -133,13 +132,7 @@ export async function createFeed(formData: FormData) {
 
   const { error } = await supabaseAdmin()
     .from("feeds")
-    .insert({
-      name,
-      url,
-      category_id: categoryId,
-      keywords: keywords || null,
-      stock_ticker: stockTicker || null,
-    });
+    .insert({ name, url, category_id: categoryId, keywords: keywords || null });
 
   if (error) throw new Error(error.message);
 
@@ -153,7 +146,6 @@ export async function updateFeed(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const url = String(formData.get("url") ?? "").trim();
   const keywords = String(formData.get("keywords") ?? "").trim();
-  const stockTicker = String(formData.get("stock_ticker") ?? "").trim().toUpperCase();
 
   if (!id || !name || !url) {
     throw new Error("Nom et URL requis");
@@ -162,7 +154,7 @@ export async function updateFeed(formData: FormData) {
 
   const { error } = await supabaseAdmin()
     .from("feeds")
-    .update({ name, url, keywords: keywords || null, stock_ticker: stockTicker || null })
+    .update({ name, url, keywords: keywords || null })
     .eq("id", id);
 
   if (error) throw new Error(error.message);
@@ -177,6 +169,59 @@ export async function deleteFeed(formData: FormData) {
   if (!id) throw new Error("id manquant");
 
   const { error } = await supabaseAdmin().from("feeds").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
+}
+
+export async function createPosition(formData: FormData) {
+  await requireAdminSession();
+
+  const ticker = String(formData.get("ticker") ?? "").trim().toUpperCase();
+  const label = String(formData.get("label") ?? "").trim();
+  const categoryId = String(formData.get("category_id") ?? "");
+
+  if (!ticker || !label || !categoryId) {
+    throw new Error("Ticker, libellé et catégorie requis");
+  }
+
+  const { error } = await supabaseAdmin()
+    .from("stock_positions")
+    .insert({ ticker, label, category_id: categoryId });
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
+}
+
+export async function updatePosition(formData: FormData) {
+  await requireAdminSession();
+
+  const id = String(formData.get("id") ?? "");
+  const ticker = String(formData.get("ticker") ?? "").trim().toUpperCase();
+  const label = String(formData.get("label") ?? "").trim();
+
+  if (!id || !ticker || !label) {
+    throw new Error("Ticker et libellé requis");
+  }
+
+  const { error } = await supabaseAdmin()
+    .from("stock_positions")
+    .update({ ticker, label })
+    .eq("id", id);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
+}
+
+export async function deletePosition(formData: FormData) {
+  await requireAdminSession();
+
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("id manquant");
+
+  const { error } = await supabaseAdmin().from("stock_positions").delete().eq("id", id);
   if (error) throw new Error(error.message);
 
   revalidatePath("/admin");

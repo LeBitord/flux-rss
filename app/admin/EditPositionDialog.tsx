@@ -14,10 +14,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Pencil } from "lucide-react";
-import type { Feed } from "@/lib/types";
-import { updateFeed } from "./actions";
+import type { StockPosition } from "@/lib/types";
+import { updatePosition } from "./actions";
 
-export function EditFeedDialog({ feed }: { feed: Feed }) {
+export function EditPositionDialog({ position }: { position: StockPosition }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -36,46 +36,34 @@ export function EditFeedDialog({ feed }: { feed: Feed }) {
       <DialogContent>
         <form
           action={async (formData) => {
-            await updateFeed(formData);
+            await updatePosition(formData);
             setOpen(false);
           }}
         >
-          <input type="hidden" name="id" value={feed.id} />
+          <input type="hidden" name="id" value={position.id} />
           <DialogHeader>
-            <DialogTitle>Modifier {feed.name}</DialogTitle>
-            <DialogDescription>Nom, URL et filtre par mots-clés.</DialogDescription>
+            <DialogTitle>Modifier {position.label}</DialogTitle>
+            <DialogDescription>Libellé et ticker.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor={`edit-feed-name-${feed.id}`}>Nom</Label>
+              <Label htmlFor={`edit-position-label-${position.id}`}>Libellé</Label>
               <Input
-                id={`edit-feed-name-${feed.id}`}
-                name="name"
-                defaultValue={feed.name}
+                id={`edit-position-label-${position.id}`}
+                name="label"
+                defaultValue={position.label}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`edit-feed-url-${feed.id}`}>URL du flux</Label>
+              <Label htmlFor={`edit-position-ticker-${position.id}`}>Ticker</Label>
               <Input
-                id={`edit-feed-url-${feed.id}`}
-                name="url"
-                defaultValue={feed.url}
+                id={`edit-position-ticker-${position.id}`}
+                name="ticker"
+                defaultValue={position.ticker}
                 required
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={`edit-feed-keywords-${feed.id}`}>Mots-clés (facultatif)</Label>
-              <Input
-                id={`edit-feed-keywords-${feed.id}`}
-                name="keywords"
-                defaultValue={feed.keywords ?? ""}
-                placeholder="intelligence artificielle, IA, GPU"
-              />
-              <p className="text-xs text-muted-foreground">
-                Séparés par des virgules. Laisser vide pour tout recevoir.
-              </p>
             </div>
           </div>
 

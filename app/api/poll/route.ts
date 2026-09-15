@@ -1,6 +1,6 @@
 import Parser from "rss-parser";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import type { Category, Feed } from "@/lib/types";
+import type { Category, Feed, StockPosition } from "@/lib/types";
 import { assertPublicHttpUrl } from "@/lib/url-safety";
 import { scoreRelevance } from "@/lib/relevance";
 import { sendBotMessage, type DiscordActionRow, type DiscordButton } from "@/lib/discord-bot";
@@ -177,21 +177,26 @@ export async function GET(req: Request) {
 
   const db = supabaseAdmin();
 
-  const [{ data: categories, error: catError }, { data: feeds, error: feedError }] =
-    await Promise.all([
-      db.from("categories").select("*"),
-      db.from("feeds").select("*").eq("active", true),
-    ]);
+  const [
+    { data: categories, error: catError },
+    { data: feeds, error: feedError },
+    { data: positions, error: positionError },
+  ] = await Promise.all([
+    db.from("categories").select("*"),
+    db.from("feeds").select("*").eq("active", true),
+    db.from("stock_positions").select("*"),
+  ]);
 
-  if (catError || feedError) {
+  if (catError || feedError || positionError) {
     return Response.json(
-      { error: catError?.message ?? feedError?.message },
+      { error: catError?.message ?? feedError?.message ?? positionError?.message },
       { status: 500 },
     );
   }
 
   const categoryList = (categories ?? []) as Category[];
   const feedList = (feeds ?? []) as Feed[];
+  const positionList = (positions ?? []) as StockPosition[];
   const categoryById = new Map(categoryList.map((c) => [c.id, c]));
 
   const newItemsByCategory = new Map<string, NewItem[]>();
@@ -276,14 +281,13 @@ export async function GET(req: Request) {
     }
   }
 
-  // Group any feeds carrying a stock_ticker by category, so a category's digest can be
-  // prefixed with the day's prices — or, if no news fired, sent as a standalone message.
+  // Group tracked positions by category, so a category's digest can be prefixed with the
+  // day's prices — or, if no news fired, sent as a standalone message.
   const tickersByCategory = new Map<string, string[]>();
-  for (const feed of feedList) {
-    if (!feed.stock_ticker) continue;
-    const bucket = tickersByCategory.get(feed.category_id) ?? [];
-    if (!bucket.includes(feed.stock_ticker)) bucket.push(feed.stock_ticker);
-    tickersByCategory.set(feed.category_id, bucket);
+  for (const position of positionList) {
+    const bucket = tickersByCategory.get(position.category_id) ?? [];
+    bucket.push(position.ticker);
+    tickersByCategory.set(position.category_id, bucket);
   }
   const stockLinesByCategory = new Map<string, string[]>();
   for (const [categoryId, tickers] of tickersByCategory) {

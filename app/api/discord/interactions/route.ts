@@ -223,14 +223,11 @@ export async function POST(req: Request) {
           if (!category) {
             content = "Ce salon n'est associé à aucune catégorie flux-rss.";
           } else {
-            const { data: feedsInCategory } = await db
-              .from("feeds")
-              .select("stock_ticker")
-              .eq("category_id", category.id)
-              .not("stock_ticker", "is", null);
-            const tickers = [
-              ...new Set((feedsInCategory ?? []).map((f) => f.stock_ticker as string)),
-            ];
+            const { data: positionsInCategory } = await db
+              .from("stock_positions")
+              .select("ticker")
+              .eq("category_id", category.id);
+            const tickers = (positionsInCategory ?? []).map((p) => p.ticker as string);
 
             if (tickers.length === 0) {
               content = `Aucun ticker boursier configuré pour **${category.name}**.`;

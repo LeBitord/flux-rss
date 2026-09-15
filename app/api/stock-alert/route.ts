@@ -2,7 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { getStockQuotes } from "@/lib/stocks";
 import { sendBotMessage } from "@/lib/discord-bot";
-import type { Category, Feed } from "@/lib/types";
+import type { Category, StockPosition } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -18,20 +18,19 @@ export async function GET(req: Request) {
   );
 
   const db = supabaseAdmin();
-  const [{ data: categories }, { data: feeds }] = await Promise.all([
+  const [{ data: categories }, { data: positions }] = await Promise.all([
     db.from("categories").select("*"),
-    db.from("feeds").select("*").not("stock_ticker", "is", null),
+    db.from("stock_positions").select("*"),
   ]);
 
   const categoryById = new Map(((categories ?? []) as Category[]).map((c) => [c.id, c]));
-  const feedList = (feeds ?? []) as Feed[];
+  const positionList = (positions ?? []) as StockPosition[];
 
-  // First feed carrying a given ticker decides which channel gets the alert.
+  const positionByTicker = new Map(positionList.map((p) => [p.ticker, p]));
   const categoryByTicker = new Map<string, Category>();
-  for (const feed of feedList) {
-    if (!feed.stock_ticker || categoryByTicker.has(feed.stock_ticker)) continue;
-    const category = categoryById.get(feed.category_id);
-    if (category) categoryByTicker.set(feed.stock_ticker, category);
+  for (const position of positionList) {
+    const category = categoryById.get(position.category_id);
+    if (category) categoryByTicker.set(position.ticker, category);
   }
 
   const tickers = [...categoryByTicker.keys()];
@@ -63,10 +62,11 @@ export async function GET(req: Request) {
 
     if (!inserted || inserted.length === 0) continue; // already alerted today
 
+    const label = positionByTicker.get(quote.ticker)?.label ?? quote.ticker;
     const arrow = direction === "up" ? "⬆️" : "⬇️";
     const sign = direction === "up" ? "+" : "";
     const content =
-      `${arrow} **${quote.ticker}** vient de franchir ${sign}${quote.changePercent.toFixed(2)}% ` +
+      `${arrow} **${label} (${quote.ticker})** vient de franchir ${sign}${quote.changePercent.toFixed(2)}% ` +
       `aujourd'hui — ${quote.price.toFixed(2)} € (${sign}${quote.change.toFixed(2)})`;
 
     const result = await sendBotMessage(category.discord_channel_id, { content });

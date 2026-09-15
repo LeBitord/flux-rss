@@ -16,6 +16,13 @@ export type Feed = {
   active: boolean;
   keywords: string | null;
   exclude_keywords: string | null;
-  stock_ticker: string | null;
+  created_at: string;
+};
+
+export type StockPosition = {
+  id: string;
+  ticker: string;
+  label: string;
+  category_id: string;
   created_at: string;
 };
