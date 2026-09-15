@@ -1,9 +1,12 @@
+import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { Category, Feed, StockPosition } from "@/lib/types";
 import { CategoryCard } from "./CategoryCard";
 import { NewCategoryDialog } from "./NewCategoryDialog";
 import { LogoutButton } from "./LogoutButton";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { Button } from "@/components/ui/button";
+import { BarChart3 } from "lucide-react";
 
 export default async function AdminPage() {
   const db = supabaseAdmin();
@@ -43,6 +46,12 @@ export default async function AdminPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <Link href="/admin/stats">
+            <Button variant="outline" size="sm">
+              <BarChart3 className="size-4" />
+              Stats
+            </Button>
+          </Link>
           <ChangePasswordDialog />
           <LogoutButton />
         </div>

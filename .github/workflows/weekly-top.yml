@@ -1,0 +1,16 @@
+name: Weekly top articles
+
+on:
+  schedule:
+    # Sunday 18:00 UTC — end-of-week wrap before the new week's digests start.
+    - cron: "0 18 * * 0"
+  workflow_dispatch: {}
+
+jobs:
+  recap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call weekly-top endpoint
+        run: |
+          curl -sf -X GET "https://flux-rss-fawn.vercel.app/api/weekly-top" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
