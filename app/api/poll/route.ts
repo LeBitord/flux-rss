@@ -24,6 +24,9 @@ type NewItem = {
 
 const HIGH_RELEVANCE_THRESHOLD = 8;
 const MAX_FEEDBACK_BUTTONS = 5; // Discord caps messages at 5 action rows; one row per fire article.
+const UNHEALTHY_ERROR_STREAK = 3;
+const UNHEALTHY_SILENCE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days without a single new item
+const HEALTH_ALERT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // re-alert on the same feed at most weekly
 
 const parser = new Parser({ timeout: 15000 });
 const MAX_EMBEDS_PER_MESSAGE = 10;
@@ -170,6 +173,33 @@ async function sendFailureAlert(errors: { feed: string; error: string }[]) {
   }
 }
 
+async function sendFeedHealthAlert(feeds: Feed[]) {
+  const webhookUrl = process.env.ALERTS_DISCORD_WEBHOOK_URL;
+  if (!webhookUrl || feeds.length === 0) return;
+
+  const lines = feeds.map((feed) => {
+    const reason =
+      feed.consecutive_errors >= UNHEALTHY_ERROR_STREAK
+        ? `${feed.consecutive_errors} échecs consécutifs`
+        : "aucun nouvel article depuis 14+ jours";
+    return `• **${feed.name}** — ${reason}`;
+  });
+  const content =
+    `🩺 **Flux RSS — ${feeds.length} flux à vérifier**\n` +
+    lines.join("\n") +
+    "\nSource probablement cassée ou tarie — à corriger ou désactiver dans l'admin.";
+
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: content.slice(0, 2000) }),
+    });
+  } catch (err) {
+    console.error("Failed to send feed health alert:", err);
+  }
+}
+
 export async function GET(req: Request) {
   if (!isAuthorizedCronRequest(req)) {
     return new Response("Unauthorized", { status: 401 });
@@ -206,6 +236,14 @@ export async function GET(req: Request) {
     try {
       await assertPublicHttpUrl(feed.url);
       const parsed = await parser.parseURL(feed.url);
+
+      // Reached as soon as the feed is fetched/parsed successfully — a feed that's merely
+      // quiet (no items today) still counts as healthy, only fetch/parse failures don't.
+      await db
+        .from("feeds")
+        .update({ consecutive_errors: 0, last_success_at: new Date().toISOString() })
+        .eq("id", feed.id);
+
       const items = parsed.items ?? [];
       if (items.length === 0) continue;
 
@@ -252,6 +290,11 @@ export async function GET(req: Request) {
 
       if (fresh.length === 0) continue;
 
+      await db
+        .from("feeds")
+        .update({ last_new_item_at: new Date().toISOString() })
+        .eq("id", feed.id);
+
       // All fresh items are recorded as seen above regardless of the keyword filters below —
       // only whether they trigger a Discord notification depends on matching them.
       const notify = fresh.filter(({ item }) =>
@@ -278,6 +321,10 @@ export async function GET(req: Request) {
         feed: feed.name,
         error: err instanceof Error ? err.message : String(err),
       });
+      await db
+        .from("feeds")
+        .update({ consecutive_errors: feed.consecutive_errors + 1 })
+        .eq("id", feed.id);
     }
   }
 
@@ -293,7 +340,22 @@ export async function GET(req: Request) {
   for (const [categoryId, tickers] of tickersByCategory) {
     try {
       const quotes = await getStockQuotes(tickers);
-      if (quotes.length > 0) stockLinesByCategory.set(categoryId, quotes.map(formatStockLine));
+      if (quotes.length > 0) {
+        stockLinesByCategory.set(categoryId, quotes.map(formatStockLine));
+
+        // Feeds the weekly position summary — no extra API calls, just persisting what
+        // was already fetched for today's digest.
+        await db
+          .from("stock_price_history")
+          .upsert(
+            quotes.map((q) => ({
+              ticker: q.ticker,
+              trade_date: q.latestTradingDay,
+              price: q.price,
+            })),
+            { onConflict: "ticker,trade_date", ignoreDuplicates: true },
+          );
+      }
     } catch (err) {
       errors.push({
         feed: "cours de bourse",
@@ -351,6 +413,37 @@ export async function GET(req: Request) {
   }
 
   await sendFailureAlert(errors);
+
+  // Re-fetch feed health fields fresh — they were updated in-loop above, so feedList is stale.
+  const { data: healthFeeds } = await db
+    .from("feeds")
+    .select("*")
+    .eq("active", true);
+  const now = Date.now();
+  const unhealthyFeeds = ((healthFeeds ?? []) as Feed[]).filter((feed) => {
+    const errorsExceeded = feed.consecutive_errors >= UNHEALTHY_ERROR_STREAK;
+    // Grace period: a feed younger than the silence window hasn't had a fair chance yet.
+    const tooYoungToJudge = now - new Date(feed.created_at).getTime() < UNHEALTHY_SILENCE_MS;
+    const silent =
+      !tooYoungToJudge &&
+      (!feed.last_new_item_at ||
+        now - new Date(feed.last_new_item_at).getTime() > UNHEALTHY_SILENCE_MS);
+    const recentlyAlerted =
+      feed.last_health_alert_at &&
+      now - new Date(feed.last_health_alert_at).getTime() < HEALTH_ALERT_COOLDOWN_MS;
+    return (errorsExceeded || silent) && !recentlyAlerted;
+  });
+
+  if (unhealthyFeeds.length > 0) {
+    await sendFeedHealthAlert(unhealthyFeeds);
+    await db
+      .from("feeds")
+      .update({ last_health_alert_at: new Date().toISOString() })
+      .in(
+        "id",
+        unhealthyFeeds.map((f) => f.id),
+      );
+  }
 
   return Response.json({
     feedsPolled: feedList.length,

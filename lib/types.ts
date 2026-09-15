@@ -16,6 +16,10 @@ export type Feed = {
   active: boolean;
   keywords: string | null;
   exclude_keywords: string | null;
+  consecutive_errors: number;
+  last_success_at: string | null;
+  last_new_item_at: string | null;
+  last_health_alert_at: string | null;
   created_at: string;
 };
 
