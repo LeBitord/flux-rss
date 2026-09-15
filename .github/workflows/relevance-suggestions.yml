@@ -1,0 +1,17 @@
+name: Relevance context suggestions
+
+on:
+  schedule:
+    # Weekly — the route itself skips a category until it has 5+ new feedback
+    # entries, so this just needs to be frequent enough not to miss a busy week.
+    - cron: "0 9 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  suggest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call relevance-suggestions endpoint
+        run: |
+          curl -sf -X GET "https://flux-rss-fawn.vercel.app/api/relevance-suggestions" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

@@ -61,6 +61,46 @@ function extractDescription(item: { title?: string; contentSnippet?: string }): 
   return snippet.length > 200 ? `${snippet.slice(0, 200)}…` : snippet;
 }
 
+const DUPLICATE_TITLE_THRESHOLD = 0.6;
+
+function titleTokens(title: string): Set<string> {
+  return new Set(
+    title
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "") // strip accents
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 2), // drop tiny/stopword-ish tokens
+  );
+}
+
+function titleSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const w of a) if (b.has(w)) intersection++;
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+// Different feeds in the same category often relay the same story (e.g. L'Équipe +
+// Google News on the same match) — collapse near-identical titles, keeping the first seen.
+function dedupeByTitle(items: NewItem[]): NewItem[] {
+  const kept: NewItem[] = [];
+  const keptTokens: Set<string>[] = [];
+  for (const item of items) {
+    const tokens = titleTokens(item.title);
+    const isDuplicate = keptTokens.some(
+      (k) => titleSimilarity(k, tokens) >= DUPLICATE_TITLE_THRESHOLD,
+    );
+    if (!isDuplicate) {
+      kept.push(item);
+      keptTokens.push(tokens);
+    }
+  }
+  return kept;
+}
+
 function parseTerms(raw: string | null): string[] {
   return (raw ?? "")
     .split(",")
@@ -327,6 +367,10 @@ export async function GET(req: Request) {
         .update({ consecutive_errors: feed.consecutive_errors + 1 })
         .eq("id", feed.id);
     }
+  }
+
+  for (const [categoryId, items] of newItemsByCategory) {
+    newItemsByCategory.set(categoryId, dedupeByTitle(items));
   }
 
   // Group tracked positions by category, so a category's digest can be prefixed with the

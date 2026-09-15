@@ -5,6 +5,7 @@ export type Category = {
   discord_channel_id: string | null;
   color: string;
   relevance_context: string | null;
+  last_relevance_suggestion_at: string | null;
   created_at: string;
 };
 

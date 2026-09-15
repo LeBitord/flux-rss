@@ -102,7 +102,7 @@ export async function POST(req: Request) {
 
     const { data: feed } = await db
       .from("feeds")
-      .select("id, keywords, exclude_keywords")
+      .select("id, category_id, keywords, exclude_keywords")
       .eq("id", seenItem.feed_id)
       .single();
 
@@ -113,6 +113,14 @@ export async function POST(req: Request) {
         .from("feeds")
         .update({ [column]: updated })
         .eq("id", feed.id);
+
+      // Kept separately from the keyword merge above so the relevance-context suggestion
+      // job can look at the raw feedback history even after keywords keep changing.
+      await db.from("feedback_log").insert({
+        category_id: feed.category_id,
+        direction,
+        topics: topics.join(", "),
+      });
     }
 
     const emoji = direction === "up" ? "👍" : "👎";
