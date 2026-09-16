@@ -47,55 +47,66 @@ async function buildChartUrl(
 ): Promise<string | null> {
   if (history.length < 2) return null; // a single point isn't a chart
 
-  const lineColor = trendUp ? "#16a34a" : "#dc2626";
-  const fillColor = trendUp ? "rgba(22, 163, 74, 0.12)" : "rgba(220, 38, 38, 0.12)";
+  const lineColor = trendUp ? "#22c55e" : "#ef4444";
+  const fillColor = trendUp ? "rgba(34, 197, 94, 0.18)" : "rgba(239, 68, 68, 0.18)";
+  const mutedColor = "#99a1af";
 
   const labelFormat: Intl.DateTimeFormatOptions =
     period === "month" ? { month: "short", year: "2-digit" } : { day: "2-digit", month: "short" };
+  const labels = history.map((h) => new Date(h.date).toLocaleDateString("fr-FR", labelFormat));
+  const closes = history.map((h) => h.close);
+  // Second dataset with a single non-null point highlights the latest close — more
+  // reliable across QuickChart's renderer than a per-point radius callback function.
+  const lastPointOnly = closes.map((_, i) => (i === closes.length - 1 ? closes[i] : null));
 
   const config = {
     type: "line",
     data: {
-      labels: history.map((h) => new Date(h.date).toLocaleDateString("fr-FR", labelFormat)),
+      labels,
       datasets: [
         {
-          data: history.map((h) => h.close),
+          data: closes,
           borderColor: lineColor,
           backgroundColor: fillColor,
           fill: true,
           pointRadius: 0,
           pointHoverRadius: 0,
-          borderWidth: 2.5,
-          tension: 0.35,
-          cubicInterpolationMode: "monotone",
+          borderWidth: 3,
+          tension: 0.4,
+        },
+        {
+          data: lastPointOnly,
+          borderColor: "transparent",
+          backgroundColor: "transparent",
+          fill: false,
+          pointRadius: 6,
+          pointBackgroundColor: lineColor,
+          pointBorderColor: "#ffffff",
+          pointBorderWidth: 2,
         },
       ],
     },
     options: {
-      layout: { padding: { top: 8, right: 12, bottom: 4, left: 4 } },
+      layout: { padding: { top: 15, right: 20, bottom: 5, left: 10 } },
       plugins: {
         legend: { display: false },
         title: {
           display: true,
           text: PERIOD_LABEL[period],
           font: { size: 13, weight: "normal" },
-          color: "#6b7280",
+          color: mutedColor,
           padding: { bottom: 10 },
         },
       },
-      elements: { line: { capBezierPoints: true } },
       scales: {
         x: {
           grid: { display: false },
-          ticks: { maxTicksLimit: 6, font: { size: 11 }, color: "#9ca3af" },
+          ticks: { maxTicksLimit: 6, font: { size: 12 }, color: mutedColor },
         },
         y: {
-          grid: { color: "#f0f0f0" },
-          ticks: {
-            font: { size: 11 },
-            color: "#9ca3af",
-            callback: "function(v) { return v.toFixed(0) + ' €'; }",
-          },
+          grid: { color: "rgba(153, 161, 175, 0.2)" },
+          ticks: { font: { size: 12 }, color: mutedColor },
+          title: { display: true, text: "€", color: mutedColor },
         },
       },
     },
@@ -108,8 +119,8 @@ async function buildChartUrl(
       body: JSON.stringify({
         chart: config,
         width: 520,
-        height: 220,
-        backgroundColor: "white",
+        height: 230,
+        backgroundColor: "transparent",
         version: "4",
         devicePixelRatio: 2,
       }),
