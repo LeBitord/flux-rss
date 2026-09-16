@@ -7,6 +7,7 @@ export type DiscordEmbed = {
   description?: string;
   author?: { name: string; icon_url?: string };
   thumbnail?: { url: string };
+  image?: { url: string };
   timestamp?: string;
   fields?: { name: string; value: string; inline?: boolean }[];
 };

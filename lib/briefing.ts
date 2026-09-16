@@ -56,7 +56,9 @@ export async function generateBriefingSummary(
         "les articles au score le plus élevé, mais mentionne aussi les autres sujets notables s'il y en a. " +
         "Cite les faits précis (noms propres, chiffres, annonces) au lieu de paraphraser vaguement. " +
         "Une catégorie sans article marquant peut avoir un résumé plus court, mais ne l'invente pas. " +
-        "Ton direct et factuel, pas de flatterie, pas d'emojis.",
+        "Ton direct et factuel, pas de flatterie, pas d'emojis. " +
+        "IMPORTANT : réponds INTÉGRALEMENT en français, y compris quand les titres sources sont en " +
+        "anglais (fréquent en tech) — traduis et reformule en français, ne laisse jamais de phrase en anglais.",
       prompt: `Catégories et leurs articles du jour (numérotés, triés par score décroissant) :\n\n${list}`,
     });
 

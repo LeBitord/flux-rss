@@ -33,12 +33,13 @@ export async function GET(req: Request) {
     if (category) categoryByTicker.set(position.ticker, category);
   }
 
-  const tickers = [...categoryByTicker.keys()];
-  if (tickers.length === 0) {
+  if (positionList.length === 0) {
     return Response.json({ checked: 0, alertsSent: 0 });
   }
 
-  const quotes = await getStockQuotes(tickers);
+  const quotes = await getStockQuotes(
+    positionList.map((p) => ({ ticker: p.ticker, label: p.label })),
+  );
   const today = new Date().toISOString().slice(0, 10);
 
   let alertsSent = 0;

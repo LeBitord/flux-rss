@@ -1,12 +1,13 @@
 export type StockQuote = {
   ticker: string;
+  label: string;
   price: number;
   change: number;
   changePercent: number;
   latestTradingDay: string;
 };
 
-export async function getStockQuote(ticker: string): Promise<StockQuote | null> {
+export async function getStockQuote(ticker: string, label: string): Promise<StockQuote | null> {
   const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
   if (!apiKey) return null;
 
@@ -22,6 +23,7 @@ export async function getStockQuote(ticker: string): Promise<StockQuote | null> 
 
     return {
       ticker,
+      label,
       price: parseFloat(quote["05. price"]),
       change: parseFloat(quote["09. change"]),
       changePercent: parseFloat(String(quote["10. change percent"]).replace("%", "")),
@@ -35,12 +37,14 @@ export async function getStockQuote(ticker: string): Promise<StockQuote | null> 
 
 // Alpha Vantage's free tier caps at ~1 request/second — space calls out when checking
 // several tickers in a row rather than firing them concurrently.
-export async function getStockQuotes(tickers: string[]): Promise<StockQuote[]> {
+export async function getStockQuotes(
+  positions: { ticker: string; label: string }[],
+): Promise<StockQuote[]> {
   const results: StockQuote[] = [];
-  for (const ticker of tickers) {
-    const quote = await getStockQuote(ticker);
+  for (let i = 0; i < positions.length; i++) {
+    const quote = await getStockQuote(positions[i].ticker, positions[i].label);
     if (quote) results.push(quote);
-    if (tickers.indexOf(ticker) < tickers.length - 1) {
+    if (i < positions.length - 1) {
       await new Promise((r) => setTimeout(r, 1200));
     }
   }
@@ -52,5 +56,5 @@ export function formatStockLine(quote: StockQuote): string {
   // to tell at a glance) in some Discord clients' emoji font.
   const arrow = quote.change >= 0 ? "⬆️" : "⬇️";
   const sign = quote.change >= 0 ? "+" : "";
-  return `${arrow} **${quote.ticker}** : ${quote.price.toFixed(2)} € (${sign}${quote.change.toFixed(2)} / ${sign}${quote.changePercent.toFixed(2)}%)`;
+  return `${arrow} **${quote.label}** (${quote.ticker}) : ${quote.price.toFixed(2)} € (${sign}${quote.change.toFixed(2)} / ${sign}${quote.changePercent.toFixed(2)}%)`;
 }

@@ -6,7 +6,9 @@ import {
   verifyKey,
 } from "discord-interactions";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { getStockQuotes, formatStockLine } from "@/lib/stocks";
+import { getStockQuotes } from "@/lib/stocks";
+import { buildStockEmbed, withLatestPoint, type PricePoint } from "@/lib/stock-embed";
+import type { DiscordEmbed } from "@/lib/discord-bot";
 
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -269,7 +271,8 @@ export async function POST(req: Request) {
     if (applicationId && token) {
       after(async () => {
         const db = supabaseAdmin();
-        let content: string;
+        let content: string | undefined;
+        let embeds: DiscordEmbed[] | undefined;
         try {
           const { data: category } = await db
             .from("categories")
@@ -282,18 +285,47 @@ export async function POST(req: Request) {
           } else {
             const { data: positionsInCategory } = await db
               .from("stock_positions")
-              .select("ticker")
+              .select("ticker, label")
               .eq("category_id", category.id);
-            const tickers = (positionsInCategory ?? []).map((p) => p.ticker as string);
+            const positions = (positionsInCategory ?? []) as { ticker: string; label: string }[];
 
-            if (tickers.length === 0) {
+            if (positions.length === 0) {
               content = `Aucun ticker boursier configuré pour **${category.name}**.`;
             } else {
-              const quotes = await getStockQuotes(tickers);
-              content =
-                quotes.length > 0
-                  ? quotes.map(formatStockLine).join("\n")
-                  : "Impossible de récupérer les cours pour le moment.";
+              const quotes = await getStockQuotes(positions);
+              if (quotes.length === 0) {
+                content = "Impossible de récupérer les cours pour le moment.";
+              } else {
+                const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+                  .toISOString()
+                  .slice(0, 10);
+                const { data: historyRows } = await db
+                  .from("stock_price_history")
+                  .select("ticker, trade_date, price")
+                  .in(
+                    "ticker",
+                    quotes.map((q) => q.ticker),
+                  )
+                  .gte("trade_date", since)
+                  .order("trade_date", { ascending: true });
+
+                const historyByTicker = new Map<string, PricePoint[]>();
+                for (const row of historyRows ?? []) {
+                  const bucket = historyByTicker.get(row.ticker as string) ?? [];
+                  bucket.push({ trade_date: row.trade_date as string, price: row.price as number });
+                  historyByTicker.set(row.ticker as string, bucket);
+                }
+
+                embeds = await Promise.all(
+                  quotes.map((quote) => {
+                    const history = withLatestPoint(
+                      historyByTicker.get(quote.ticker) ?? [],
+                      quote,
+                    );
+                    return buildStockEmbed(quote, history);
+                  }),
+                );
+              }
             }
           }
         } catch (err) {
@@ -307,7 +339,7 @@ export async function POST(req: Request) {
             {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ content }),
+              body: JSON.stringify({ content, embeds }),
             },
           );
         } catch (err) {

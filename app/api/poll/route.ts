@@ -4,8 +4,14 @@ import type { Category, Feed, StockPosition } from "@/lib/types";
 import { assertPublicHttpUrl } from "@/lib/url-safety";
 import { scoreRelevance } from "@/lib/relevance";
 import { generateBriefingSummary } from "@/lib/briefing";
-import { sendBotMessage, type DiscordActionRow, type DiscordButton } from "@/lib/discord-bot";
-import { getStockQuotes, formatStockLine } from "@/lib/stocks";
+import {
+  sendBotMessage,
+  type DiscordActionRow,
+  type DiscordButton,
+  type DiscordEmbed,
+} from "@/lib/discord-bot";
+import { getStockQuotes, formatStockLine, type StockQuote } from "@/lib/stocks";
+import { buildStockEmbed, withLatestPoint, type PricePoint } from "@/lib/stock-embed";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const maxDuration = 300;
@@ -128,7 +134,6 @@ function passesKeywordFilters(
 async function sendCategoryDigest(
   category: Category,
   items: NewItem[],
-  stockLines: string[] = [],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!category.discord_channel_id) {
     return { ok: false, error: "Aucun salon Discord (discord_channel_id) configuré" };
@@ -176,22 +181,23 @@ async function sendCategoryDigest(
   }));
 
   const content =
-    (stockLines.length > 0 ? `${stockLines.join("\n")}\n\n` : "") +
     `**${category.name}** — ${items.length} nouvel(le)(s) article(s)` +
     (overflow > 0 ? `\n…et ${overflow} autre(s) non affiché(s).` : "");
 
   return sendBotMessage(category.discord_channel_id, { content, embeds, components });
 }
 
-async function sendStandaloneStockMessage(
+async function sendStockDigest(
   category: Category,
-  stockLines: string[],
+  embeds: DiscordEmbed[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!category.discord_channel_id) {
     return { ok: false, error: "Aucun salon Discord (discord_channel_id) configuré" };
   }
-  const content = `**${category.name}** — cours du jour\n${stockLines.join("\n")}`;
-  return sendBotMessage(category.discord_channel_id, { content });
+  return sendBotMessage(category.discord_channel_id, {
+    content: `**${category.name}** — cours du jour`,
+    embeds,
+  });
 }
 
 async function sendFailureAlert(errors: { feed: string; error: string }[]) {
@@ -402,37 +408,62 @@ export async function GET(req: Request) {
     newItemsByCategory.set(categoryId, dedupeByTitle(items));
   }
 
-  // Group tracked positions by category, so a category's digest can be prefixed with the
-  // day's prices — or, if no news fired, sent as a standalone message.
-  const tickersByCategory = new Map<string, string[]>();
+  // Group tracked positions by category — each gets its own chart-embed message,
+  // independent of whether a news digest also fires for that category today.
+  const positionsByCategory = new Map<string, { ticker: string; label: string }[]>();
   for (const position of positionList) {
-    const bucket = tickersByCategory.get(position.category_id) ?? [];
-    bucket.push(position.ticker);
-    tickersByCategory.set(position.category_id, bucket);
+    const bucket = positionsByCategory.get(position.category_id) ?? [];
+    bucket.push({ ticker: position.ticker, label: position.label });
+    positionsByCategory.set(position.category_id, bucket);
   }
-  const stockLinesByCategory = new Map<string, string[]>();
-  const allStockLines: string[] = [];
-  for (const [categoryId, tickers] of tickersByCategory) {
-    try {
-      const quotes = await getStockQuotes(tickers);
-      if (quotes.length > 0) {
-        const lines = quotes.map(formatStockLine);
-        stockLinesByCategory.set(categoryId, lines);
-        allStockLines.push(...lines);
 
-        // Feeds the weekly position summary — no extra API calls, just persisting what
-        // was already fetched for today's digest.
-        await db
-          .from("stock_price_history")
-          .upsert(
-            quotes.map((q) => ({
-              ticker: q.ticker,
-              trade_date: q.latestTradingDay,
-              price: q.price,
-            })),
-            { onConflict: "ticker,trade_date", ignoreDuplicates: true },
-          );
+  const stockEmbedsByCategory = new Map<string, DiscordEmbed[]>();
+  const allStockLines: string[] = [];
+  for (const [categoryId, positionsInCategory] of positionsByCategory) {
+    try {
+      const quotes = await getStockQuotes(positionsInCategory);
+      if (quotes.length === 0) continue;
+
+      allStockLines.push(...quotes.map(formatStockLine));
+
+      // Feeds the weekly position summary — no extra API calls, just persisting what
+      // was already fetched for today's digest.
+      await db
+        .from("stock_price_history")
+        .upsert(
+          quotes.map((q) => ({
+            ticker: q.ticker,
+            trade_date: q.latestTradingDay,
+            price: q.price,
+          })),
+          { onConflict: "ticker,trade_date", ignoreDuplicates: true },
+        );
+
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const { data: historyRows } = await db
+        .from("stock_price_history")
+        .select("ticker, trade_date, price")
+        .in(
+          "ticker",
+          quotes.map((q) => q.ticker),
+        )
+        .gte("trade_date", since)
+        .order("trade_date", { ascending: true });
+
+      const historyByTicker = new Map<string, PricePoint[]>();
+      for (const row of historyRows ?? []) {
+        const bucket = historyByTicker.get(row.ticker as string) ?? [];
+        bucket.push({ trade_date: row.trade_date as string, price: row.price as number });
+        historyByTicker.set(row.ticker as string, bucket);
       }
+
+      const embeds = await Promise.all(
+        quotes.map((quote) => {
+          const history = withLatestPoint(historyByTicker.get(quote.ticker) ?? [], quote);
+          return buildStockEmbed(quote, history);
+        }),
+      );
+      stockEmbedsByCategory.set(categoryId, embeds);
     } catch (err) {
       errors.push({
         feed: "cours de bourse",
@@ -469,21 +500,19 @@ export async function GET(req: Request) {
       ),
     );
 
-    const stockLines = stockLinesByCategory.get(categoryId) ?? [];
-    const result = await sendCategoryDigest(category, items, stockLines);
+    const result = await sendCategoryDigest(category, items);
     if (!result.ok) {
       errors.push({ feed: `catégorie ${category.name}`, error: result.error });
       continue;
     }
     digestsSent += 1;
-    stockLinesByCategory.delete(categoryId); // included in the digest above — skip the standalone send
   }
 
-  // Categories with tickers but no news digest today still get their prices.
-  for (const [categoryId, stockLines] of stockLinesByCategory) {
+  // Always its own message — a chart per position, independent of whether news fired.
+  for (const [categoryId, embeds] of stockEmbedsByCategory) {
     const category = categoryById.get(categoryId);
     if (!category) continue;
-    const result = await sendStandaloneStockMessage(category, stockLines);
+    const result = await sendStockDigest(category, embeds);
     if (!result.ok) {
       errors.push({ feed: `cours ${category.name}`, error: result.error });
     }
