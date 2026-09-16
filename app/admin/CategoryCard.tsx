@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
-import type { Category, Feed, StockPosition } from "@/lib/types";
+import type { Category, Feed, StockPosition, PositionTransactionRow } from "@/lib/types";
 import { deleteCategory, deleteFeed, deletePosition } from "./actions";
 import { FeedActiveToggle } from "./FeedActiveToggle";
 import { NewFeedDialog } from "./NewFeedDialog";
@@ -37,15 +37,18 @@ import { EditCategoryDialog } from "./EditCategoryDialog";
 import { EditFeedDialog } from "./EditFeedDialog";
 import { NewPositionDialog } from "./NewPositionDialog";
 import { EditPositionDialog } from "./EditPositionDialog";
+import { TransactionDialog } from "./TransactionDialog";
 
 export function CategoryCard({
   category,
   feeds,
   positions,
+  transactionsByPosition,
 }: {
   category: Category;
   feeds: Feed[];
   positions: StockPosition[];
+  transactionsByPosition: Map<string, PositionTransactionRow[]>;
 }) {
   return (
     <Card>
@@ -179,6 +182,10 @@ export function CategoryCard({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
+                        <TransactionDialog
+                          position={position}
+                          transactions={transactionsByPosition.get(position.id) ?? []}
+                        />
                         <EditPositionDialog position={position} />
                         <form action={deletePosition}>
                           <input type="hidden" name="id" value={position.id} />

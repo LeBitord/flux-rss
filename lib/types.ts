@@ -25,6 +25,15 @@ export type Feed = {
   created_at: string;
 };
 
+export type PositionTransactionRow = {
+  id: string;
+  position_id: string;
+  transaction_date: string;
+  shares: number;
+  price_per_share: number;
+  created_at: string;
+};
+
 export type StockPosition = {
   id: string;
   ticker: string;

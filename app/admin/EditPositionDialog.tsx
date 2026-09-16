@@ -43,7 +43,9 @@ export function EditPositionDialog({ position }: { position: StockPosition }) {
           <input type="hidden" name="id" value={position.id} />
           <DialogHeader>
             <DialogTitle>Modifier {position.label}</DialogTitle>
-            <DialogDescription>Libellé et ticker.</DialogDescription>
+            <DialogDescription>
+              Libellé et ticker. Parts et PRU se gèrent via l&apos;historique de transactions.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
@@ -65,45 +67,12 @@ export function EditPositionDialog({ position }: { position: StockPosition }) {
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor={`edit-position-shares-${position.id}`}>
-                Nombre de parts (facultatif)
-              </Label>
-              <Input
-                id={`edit-position-shares-${position.id}`}
-                name="shares"
-                type="number"
-                min="0"
-                step="any"
-                defaultValue={position.shares ?? ""}
-                placeholder="10"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={`edit-position-cost-basis-${position.id}`}>
-                Prix de revient moyen (facultatif)
-              </Label>
-              <Input
-                id={`edit-position-cost-basis-${position.id}`}
-                name="cost_basis"
-                type="number"
-                min="0"
-                step="any"
-                defaultValue={position.cost_basis ?? ""}
-                placeholder="150.00"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={`edit-position-purchase-date-${position.id}`}>
-                Date d&apos;achat (facultatif)
-              </Label>
-              <Input
-                id={`edit-position-purchase-date-${position.id}`}
-                name="purchase_date"
-                type="date"
-                defaultValue={position.purchase_date ?? ""}
-              />
-            </div>
+            {position.shares != null && (
+              <p className="text-xs text-muted-foreground">
+                Position actuelle : {position.shares} part{position.shares > 1 ? "s" : ""}
+                {position.cost_basis != null && ` · PRU ${position.cost_basis.toFixed(2)} €`}
+              </p>
+            )}
           </div>
 
           <DialogFooter>

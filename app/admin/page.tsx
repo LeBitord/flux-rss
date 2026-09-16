@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import type { Category, Feed, StockPosition } from "@/lib/types";
+import type { Category, Feed, StockPosition, PositionTransactionRow } from "@/lib/types";
 import { CategoryCard } from "./CategoryCard";
 import { NewCategoryDialog } from "./NewCategoryDialog";
 import { LogoutButton } from "./LogoutButton";
@@ -11,15 +11,18 @@ import { BarChart3 } from "lucide-react";
 export default async function AdminPage() {
   const db = supabaseAdmin();
 
-  const [{ data: categories }, { data: feeds }, { data: positions }] = await Promise.all([
-    db.from("categories").select("*").order("name"),
-    db.from("feeds").select("*").order("name"),
-    db.from("stock_positions").select("*").order("label"),
-  ]);
+  const [{ data: categories }, { data: feeds }, { data: positions }, { data: transactions }] =
+    await Promise.all([
+      db.from("categories").select("*").order("name"),
+      db.from("feeds").select("*").order("name"),
+      db.from("stock_positions").select("*").order("label"),
+      db.from("position_transactions").select("*"),
+    ]);
 
   const categoryList = (categories ?? []) as Category[];
   const feedList = (feeds ?? []) as Feed[];
   const positionList = (positions ?? []) as StockPosition[];
+  const transactionList = (transactions ?? []) as PositionTransactionRow[];
   const feedsByCategory = new Map<string, Feed[]>();
   for (const feed of feedList) {
     const bucket = feedsByCategory.get(feed.category_id) ?? [];
@@ -31,6 +34,12 @@ export default async function AdminPage() {
     const bucket = positionsByCategory.get(position.category_id) ?? [];
     bucket.push(position);
     positionsByCategory.set(position.category_id, bucket);
+  }
+  const transactionsByPosition = new Map<string, PositionTransactionRow[]>();
+  for (const tx of transactionList) {
+    const bucket = transactionsByPosition.get(tx.position_id) ?? [];
+    bucket.push(tx);
+    transactionsByPosition.set(tx.position_id, bucket);
   }
 
   return (
@@ -73,6 +82,7 @@ export default async function AdminPage() {
               category={category}
               feeds={feedsByCategory.get(category.id) ?? []}
               positions={positionsByCategory.get(category.id) ?? []}
+              transactionsByPosition={transactionsByPosition}
             />
           ))}
         </div>

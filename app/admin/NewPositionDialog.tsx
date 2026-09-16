@@ -37,6 +37,7 @@ export function NewPositionDialog({ categoryId }: { categoryId: string }) {
             <DialogTitle>Nouvelle position</DialogTitle>
             <DialogDescription>
               Cours ajouté au digest quotidien de cette catégorie, et disponible via /cours.
+              Ajoute ensuite tes achats via le bouton dédié pour suivre parts et PRU.
             </DialogDescription>
           </DialogHeader>
 
@@ -52,40 +53,6 @@ export function NewPositionDialog({ categoryId }: { categoryId: string }) {
                 Symbole Alpha Vantage (ex. AI.PA pour Air Liquide, DCAM.PAR pour un ETF Euronext
                 Paris).
               </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="position-shares">Nombre de parts (facultatif)</Label>
-              <Input
-                id="position-shares"
-                name="shares"
-                type="number"
-                min="0"
-                step="any"
-                placeholder="10"
-              />
-              <p className="text-xs text-muted-foreground">
-                Si renseigné, la valeur réelle de la position (parts × cours) s'affiche en plus du
-                cours et de la variation.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="position-cost-basis">Prix de revient moyen (facultatif)</Label>
-              <Input
-                id="position-cost-basis"
-                name="cost_basis"
-                type="number"
-                min="0"
-                step="any"
-                placeholder="150.00"
-              />
-              <p className="text-xs text-muted-foreground">
-                PRU par part. Permet de calculer la performance réelle depuis l&apos;achat, pas
-                seulement depuis le début du suivi.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="position-purchase-date">Date d&apos;achat (facultatif)</Label>
-              <Input id="position-purchase-date" name="purchase_date" type="date" />
             </div>
           </div>
 

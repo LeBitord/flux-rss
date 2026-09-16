@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { requireAdminSession, setPassword, setSessionCookie, verifyPassword } from "@/lib/auth";
 import { assertPublicHttpUrl, isValidDiscordWebhookUrl } from "@/lib/url-safety";
+import {
+  computeHoldingFromTransactions,
+  type PositionTransaction,
+} from "@/lib/position-transactions";
 
 export type ChangePasswordState = { error?: string; success?: boolean };
 
@@ -180,30 +184,14 @@ export async function createPosition(formData: FormData) {
   const ticker = String(formData.get("ticker") ?? "").trim().toUpperCase();
   const label = String(formData.get("label") ?? "").trim();
   const categoryId = String(formData.get("category_id") ?? "");
-  const sharesRaw = String(formData.get("shares") ?? "").trim();
-  const shares = sharesRaw ? parseFloat(sharesRaw) : null;
-  const costBasisRaw = String(formData.get("cost_basis") ?? "").trim();
-  const costBasis = costBasisRaw ? parseFloat(costBasisRaw) : null;
-  const purchaseDate = String(formData.get("purchase_date") ?? "").trim();
 
   if (!ticker || !label || !categoryId) {
     throw new Error("Ticker, libellé et catégorie requis");
   }
-  if (shares !== null && (Number.isNaN(shares) || shares < 0)) {
-    throw new Error("Nombre de parts invalide");
-  }
-  if (costBasis !== null && (Number.isNaN(costBasis) || costBasis < 0)) {
-    throw new Error("Prix de revient invalide");
-  }
 
-  const { error } = await supabaseAdmin().from("stock_positions").insert({
-    ticker,
-    label,
-    category_id: categoryId,
-    shares,
-    cost_basis: costBasis,
-    purchase_date: purchaseDate || null,
-  });
+  const { error } = await supabaseAdmin()
+    .from("stock_positions")
+    .insert({ ticker, label, category_id: categoryId });
 
   if (error) throw new Error(error.message);
 
@@ -216,31 +204,14 @@ export async function updatePosition(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const ticker = String(formData.get("ticker") ?? "").trim().toUpperCase();
   const label = String(formData.get("label") ?? "").trim();
-  const sharesRaw = String(formData.get("shares") ?? "").trim();
-  const shares = sharesRaw ? parseFloat(sharesRaw) : null;
-  const costBasisRaw = String(formData.get("cost_basis") ?? "").trim();
-  const costBasis = costBasisRaw ? parseFloat(costBasisRaw) : null;
-  const purchaseDate = String(formData.get("purchase_date") ?? "").trim();
 
   if (!id || !ticker || !label) {
     throw new Error("Ticker et libellé requis");
   }
-  if (shares !== null && (Number.isNaN(shares) || shares < 0)) {
-    throw new Error("Nombre de parts invalide");
-  }
-  if (costBasis !== null && (Number.isNaN(costBasis) || costBasis < 0)) {
-    throw new Error("Prix de revient invalide");
-  }
 
   const { error } = await supabaseAdmin()
     .from("stock_positions")
-    .update({
-      ticker,
-      label,
-      shares,
-      cost_basis: costBasis,
-      purchase_date: purchaseDate || null,
-    })
+    .update({ ticker, label })
     .eq("id", id);
 
   if (error) throw new Error(error.message);
@@ -257,6 +228,77 @@ export async function deletePosition(formData: FormData) {
   const { error } = await supabaseAdmin().from("stock_positions").delete().eq("id", id);
   if (error) throw new Error(error.message);
 
+  revalidatePath("/admin");
+}
+
+// Recomputes shares + PRU moyen for a position from its full transaction history and
+// writes them back to stock_positions — the two fields are a cache, transactions are
+// the source of truth, so this runs after every insert/delete below.
+async function recomputeHolding(positionId: string) {
+  const db = supabaseAdmin();
+  const { data: transactions } = await db
+    .from("position_transactions")
+    .select("transaction_date, shares, price_per_share")
+    .eq("position_id", positionId);
+
+  const { shares, costBasis } = computeHoldingFromTransactions(
+    (transactions ?? []) as PositionTransaction[],
+  );
+
+  const { error } = await db
+    .from("stock_positions")
+    .update({ shares: shares > 0 ? shares : null, cost_basis: costBasis })
+    .eq("id", positionId);
+  if (error) throw new Error(error.message);
+}
+
+export async function addTransaction(formData: FormData) {
+  await requireAdminSession();
+
+  const positionId = String(formData.get("position_id") ?? "");
+  const transactionDate = String(formData.get("transaction_date") ?? "").trim();
+  const type = String(formData.get("type") ?? "buy");
+  const sharesRaw = String(formData.get("shares") ?? "").trim();
+  const priceRaw = String(formData.get("price_per_share") ?? "").trim();
+
+  const shares = parseFloat(sharesRaw);
+  const price = parseFloat(priceRaw);
+
+  if (!positionId || !transactionDate) {
+    throw new Error("Position et date requises");
+  }
+  if (Number.isNaN(shares) || shares <= 0) {
+    throw new Error("Nombre de parts invalide");
+  }
+  if (Number.isNaN(price) || price < 0) {
+    throw new Error("Prix invalide");
+  }
+
+  const db = supabaseAdmin();
+  const { error } = await db.from("position_transactions").insert({
+    position_id: positionId,
+    transaction_date: transactionDate,
+    shares: type === "sell" ? -shares : shares,
+    price_per_share: price,
+  });
+  if (error) throw new Error(error.message);
+
+  await recomputeHolding(positionId);
+  revalidatePath("/admin");
+}
+
+export async function deleteTransaction(formData: FormData) {
+  await requireAdminSession();
+
+  const id = String(formData.get("id") ?? "");
+  const positionId = String(formData.get("position_id") ?? "");
+  if (!id || !positionId) throw new Error("id manquant");
+
+  const db = supabaseAdmin();
+  const { error } = await db.from("position_transactions").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+
+  await recomputeHolding(positionId);
   revalidatePath("/admin");
 }
 
