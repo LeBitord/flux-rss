@@ -68,6 +68,25 @@ export function NewPositionDialog({ categoryId }: { categoryId: string }) {
                 cours et de la variation.
               </p>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="position-cost-basis">Prix de revient moyen (facultatif)</Label>
+              <Input
+                id="position-cost-basis"
+                name="cost_basis"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="150.00"
+              />
+              <p className="text-xs text-muted-foreground">
+                PRU par part. Permet de calculer la performance réelle depuis l&apos;achat, pas
+                seulement depuis le début du suivi.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="position-purchase-date">Date d&apos;achat (facultatif)</Label>
+              <Input id="position-purchase-date" name="purchase_date" type="date" />
+            </div>
           </div>
 
           <DialogFooter>

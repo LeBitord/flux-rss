@@ -11,7 +11,7 @@ import {
   type DiscordEmbed,
 } from "@/lib/discord-bot";
 import { getStockQuotesWithHistory, formatStockLine } from "@/lib/stocks";
-import { buildStockEmbed, buildPortfolioTotalEmbed } from "@/lib/stock-embed";
+import { buildStockEmbed, buildPortfolioTotalEmbed, type HoldingInfo } from "@/lib/stock-embed";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const maxDuration = 300;
@@ -421,7 +421,12 @@ export async function GET(req: Request) {
   const allStockLines: string[] = [];
   for (const [categoryId, positionsInCategory] of positionsByCategory) {
     try {
-      const sharesByTicker = new Map(positionsInCategory.map((p) => [p.ticker, p.shares]));
+      const holdingByTicker = new Map<string, HoldingInfo>(
+        positionsInCategory.map((p) => [
+          p.ticker,
+          { shares: p.shares, costBasis: p.cost_basis, purchaseDate: p.purchase_date },
+        ]),
+      );
       const results = await getStockQuotesWithHistory(
         positionsInCategory.map((p) => ({ ticker: p.ticker, label: p.label })),
       );
@@ -444,11 +449,14 @@ export async function GET(req: Request) {
 
       const embeds = await Promise.all(
         results.map(({ quote, history }) =>
-          buildStockEmbed(quote, history, "month", sharesByTicker.get(quote.ticker) ?? null),
+          buildStockEmbed(quote, history, "month", holdingByTicker.get(quote.ticker) ?? null),
         ),
       );
       const totalEmbed = buildPortfolioTotalEmbed(
-        results.map(({ quote }) => ({ quote, shares: sharesByTicker.get(quote.ticker) ?? null })),
+        results.map(({ quote }) => ({
+          quote,
+          holding: holdingByTicker.get(quote.ticker) ?? null,
+        })),
       );
       if (totalEmbed) embeds.push(totalEmbed);
       stockEmbedsByCategory.set(categoryId, embeds);

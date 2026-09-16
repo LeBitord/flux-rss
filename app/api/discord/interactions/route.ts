@@ -7,7 +7,12 @@ import {
 } from "discord-interactions";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { getStockQuotesWithHistory } from "@/lib/stocks";
-import { buildStockEmbed, buildPortfolioTotalEmbed, type ChartPeriod } from "@/lib/stock-embed";
+import {
+  buildStockEmbed,
+  buildPortfolioTotalEmbed,
+  type ChartPeriod,
+  type HoldingInfo,
+} from "@/lib/stock-embed";
 import type { DiscordEmbed } from "@/lib/discord-bot";
 
 const DISCORD_API = "https://discord.com/api/v10";
@@ -289,31 +294,38 @@ export async function POST(req: Request) {
           } else {
             const { data: positionsInCategory } = await db
               .from("stock_positions")
-              .select("ticker, label, shares")
+              .select("ticker, label, shares, cost_basis, purchase_date")
               .eq("category_id", category.id);
             const positions = (positionsInCategory ?? []) as {
               ticker: string;
               label: string;
               shares: number | null;
+              cost_basis: number | null;
+              purchase_date: string | null;
             }[];
 
             if (positions.length === 0) {
               content = `Aucun ticker boursier configuré pour **${category.name}**.`;
             } else {
-              const sharesByTicker = new Map(positions.map((p) => [p.ticker, p.shares]));
+              const holdingByTicker = new Map<string, HoldingInfo>(
+                positions.map((p) => [
+                  p.ticker,
+                  { shares: p.shares, costBasis: p.cost_basis, purchaseDate: p.purchase_date },
+                ]),
+              );
               const results = await getStockQuotesWithHistory(positions);
               if (results.length === 0) {
                 content = "Impossible de récupérer les cours pour le moment.";
               } else {
                 embeds = await Promise.all(
                   results.map(({ quote, history }) =>
-                    buildStockEmbed(quote, history, period, sharesByTicker.get(quote.ticker) ?? null),
+                    buildStockEmbed(quote, history, period, holdingByTicker.get(quote.ticker) ?? null),
                   ),
                 );
                 const totalEmbed = buildPortfolioTotalEmbed(
                   results.map(({ quote }) => ({
                     quote,
-                    shares: sharesByTicker.get(quote.ticker) ?? null,
+                    holding: holdingByTicker.get(quote.ticker) ?? null,
                   })),
                 );
                 if (totalEmbed) embeds.push(totalEmbed);

@@ -182,6 +182,9 @@ export async function createPosition(formData: FormData) {
   const categoryId = String(formData.get("category_id") ?? "");
   const sharesRaw = String(formData.get("shares") ?? "").trim();
   const shares = sharesRaw ? parseFloat(sharesRaw) : null;
+  const costBasisRaw = String(formData.get("cost_basis") ?? "").trim();
+  const costBasis = costBasisRaw ? parseFloat(costBasisRaw) : null;
+  const purchaseDate = String(formData.get("purchase_date") ?? "").trim();
 
   if (!ticker || !label || !categoryId) {
     throw new Error("Ticker, libellé et catégorie requis");
@@ -189,10 +192,18 @@ export async function createPosition(formData: FormData) {
   if (shares !== null && (Number.isNaN(shares) || shares < 0)) {
     throw new Error("Nombre de parts invalide");
   }
+  if (costBasis !== null && (Number.isNaN(costBasis) || costBasis < 0)) {
+    throw new Error("Prix de revient invalide");
+  }
 
-  const { error } = await supabaseAdmin()
-    .from("stock_positions")
-    .insert({ ticker, label, category_id: categoryId, shares });
+  const { error } = await supabaseAdmin().from("stock_positions").insert({
+    ticker,
+    label,
+    category_id: categoryId,
+    shares,
+    cost_basis: costBasis,
+    purchase_date: purchaseDate || null,
+  });
 
   if (error) throw new Error(error.message);
 
@@ -207,6 +218,9 @@ export async function updatePosition(formData: FormData) {
   const label = String(formData.get("label") ?? "").trim();
   const sharesRaw = String(formData.get("shares") ?? "").trim();
   const shares = sharesRaw ? parseFloat(sharesRaw) : null;
+  const costBasisRaw = String(formData.get("cost_basis") ?? "").trim();
+  const costBasis = costBasisRaw ? parseFloat(costBasisRaw) : null;
+  const purchaseDate = String(formData.get("purchase_date") ?? "").trim();
 
   if (!id || !ticker || !label) {
     throw new Error("Ticker et libellé requis");
@@ -214,10 +228,19 @@ export async function updatePosition(formData: FormData) {
   if (shares !== null && (Number.isNaN(shares) || shares < 0)) {
     throw new Error("Nombre de parts invalide");
   }
+  if (costBasis !== null && (Number.isNaN(costBasis) || costBasis < 0)) {
+    throw new Error("Prix de revient invalide");
+  }
 
   const { error } = await supabaseAdmin()
     .from("stock_positions")
-    .update({ ticker, label, shares })
+    .update({
+      ticker,
+      label,
+      shares,
+      cost_basis: costBasis,
+      purchase_date: purchaseDate || null,
+    })
     .eq("id", id);
 
   if (error) throw new Error(error.message);

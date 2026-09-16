@@ -134,28 +134,48 @@ async function buildChartUrl(
   }
 }
 
+export type HoldingInfo = {
+  shares: number | null;
+  costBasis: number | null;
+  purchaseDate: string | null;
+};
+
 export async function buildStockEmbed(
   quote: StockQuote,
   fullHistory: DailyClose[],
   period: ChartPeriod = "month",
-  shares: number | null = null,
+  holding: HoldingInfo | null = null,
 ): Promise<DiscordEmbed> {
   const trendUp = quote.change >= 0;
   const arrow = trendUp ? "⬆️" : "⬇️";
   const sign = trendUp ? "+" : "";
   const color = trendUp ? 0x16a34a : 0xdc2626;
 
+  const shares = holding?.shares ?? null;
+  const costBasis = holding?.costBasis ?? null;
+
   const valueLine =
     shares && shares > 0
       ? `\nValeur : **${(shares * quote.price).toFixed(2)} €** (${sign}${(shares * quote.change).toFixed(2)} € aujourd'hui)`
       : "";
+
+  let sincePurchaseLine = "";
+  if (shares && shares > 0 && costBasis && costBasis > 0) {
+    const gain = shares * (quote.price - costBasis);
+    const gainPercent = ((quote.price - costBasis) / costBasis) * 100;
+    const gainSign = gain >= 0 ? "+" : "";
+    const dateLabel = holding?.purchaseDate
+      ? ` depuis le ${new Date(holding.purchaseDate).toLocaleDateString("fr-FR")}`
+      : "";
+    sincePurchaseLine = `\nPerformance${dateLabel} : **${gainSign}${gain.toFixed(2)} €** (${gainSign}${gainPercent.toFixed(2)}%)`;
+  }
 
   const embed: DiscordEmbed = {
     title: `${arrow} ${quote.label}`,
     color,
     description:
       `**${quote.price.toFixed(2)} €**  (${sign}${quote.change.toFixed(2)} / ${sign}${quote.changePercent.toFixed(2)}%)\n` +
-      `\`${quote.ticker}\`${valueLine}`,
+      `\`${quote.ticker}\`${valueLine}${sincePurchaseLine}`,
   };
 
   const chartUrl = await buildChartUrl(aggregateByPeriod(fullHistory, period), period, trendUp);
@@ -167,19 +187,33 @@ export async function buildStockEmbed(
 // Only counts positions where shares are actually known — a category can mix tracked-only
 // tickers (no shares) with real holdings, so the total reflects just the latter.
 export function buildPortfolioTotalEmbed(
-  quotes: { quote: StockQuote; shares: number | null }[],
+  quotes: { quote: StockQuote; holding: HoldingInfo | null }[],
 ): DiscordEmbed | null {
-  const held = quotes.filter((q) => q.shares && q.shares > 0);
+  const held = quotes.filter((q) => q.holding?.shares && q.holding.shares > 0);
   if (held.length === 0) return null;
 
-  const total = held.reduce((sum, q) => sum + q.shares! * q.quote.price, 0);
-  const totalChange = held.reduce((sum, q) => sum + q.shares! * q.quote.change, 0);
+  const total = held.reduce((sum, q) => sum + q.holding!.shares! * q.quote.price, 0);
+  const totalChange = held.reduce((sum, q) => sum + q.holding!.shares! * q.quote.change, 0);
   const trendUp = totalChange >= 0;
   const sign = trendUp ? "+" : "";
+
+  const withCostBasis = held.filter((q) => q.holding?.costBasis && q.holding.costBasis > 0);
+  let sincePurchaseLine = "";
+  if (withCostBasis.length > 0) {
+    const invested = withCostBasis.reduce(
+      (sum, q) => sum + q.holding!.shares! * q.holding!.costBasis!,
+      0,
+    );
+    const currentValue = withCostBasis.reduce((sum, q) => sum + q.holding!.shares! * q.quote.price, 0);
+    const gain = currentValue - invested;
+    const gainPercent = invested > 0 ? (gain / invested) * 100 : 0;
+    const gainSign = gain >= 0 ? "+" : "";
+    sincePurchaseLine = `\nPerformance globale : **${gainSign}${gain.toFixed(2)} €** (${gainSign}${gainPercent.toFixed(2)}%)`;
+  }
 
   return {
     title: `${trendUp ? "⬆️" : "⬇️"} Valeur totale du portefeuille`,
     color: trendUp ? 0x16a34a : 0xdc2626,
-    description: `**${total.toFixed(2)} €**  (${sign}${totalChange.toFixed(2)} € aujourd'hui)`,
+    description: `**${total.toFixed(2)} €**  (${sign}${totalChange.toFixed(2)} € aujourd'hui)${sincePurchaseLine}`,
   };
 }

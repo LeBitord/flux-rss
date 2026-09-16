@@ -79,6 +79,31 @@ export function EditPositionDialog({ position }: { position: StockPosition }) {
                 placeholder="10"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor={`edit-position-cost-basis-${position.id}`}>
+                Prix de revient moyen (facultatif)
+              </Label>
+              <Input
+                id={`edit-position-cost-basis-${position.id}`}
+                name="cost_basis"
+                type="number"
+                min="0"
+                step="any"
+                defaultValue={position.cost_basis ?? ""}
+                placeholder="150.00"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`edit-position-purchase-date-${position.id}`}>
+                Date d&apos;achat (facultatif)
+              </Label>
+              <Input
+                id={`edit-position-purchase-date-${position.id}`}
+                name="purchase_date"
+                type="date"
+                defaultValue={position.purchase_date ?? ""}
+              />
+            </div>
           </div>
 
           <DialogFooter>
