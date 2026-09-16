@@ -53,6 +53,21 @@ export function NewPositionDialog({ categoryId }: { categoryId: string }) {
                 Paris).
               </p>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="position-shares">Nombre de parts (facultatif)</Label>
+              <Input
+                id="position-shares"
+                name="shares"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="10"
+              />
+              <p className="text-xs text-muted-foreground">
+                Si renseigné, la valeur réelle de la position (parts × cours) s'affiche en plus du
+                cours et de la variation.
+              </p>
+            </div>
           </div>
 
           <DialogFooter>

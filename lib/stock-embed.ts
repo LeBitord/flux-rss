@@ -138,22 +138,48 @@ export async function buildStockEmbed(
   quote: StockQuote,
   fullHistory: DailyClose[],
   period: ChartPeriod = "month",
+  shares: number | null = null,
 ): Promise<DiscordEmbed> {
   const trendUp = quote.change >= 0;
   const arrow = trendUp ? "⬆️" : "⬇️";
   const sign = trendUp ? "+" : "";
   const color = trendUp ? 0x16a34a : 0xdc2626;
 
+  const valueLine =
+    shares && shares > 0
+      ? `\nValeur : **${(shares * quote.price).toFixed(2)} €** (${sign}${(shares * quote.change).toFixed(2)} € aujourd'hui)`
+      : "";
+
   const embed: DiscordEmbed = {
     title: `${arrow} ${quote.label}`,
     color,
     description:
       `**${quote.price.toFixed(2)} €**  (${sign}${quote.change.toFixed(2)} / ${sign}${quote.changePercent.toFixed(2)}%)\n` +
-      `\`${quote.ticker}\``,
+      `\`${quote.ticker}\`${valueLine}`,
   };
 
   const chartUrl = await buildChartUrl(aggregateByPeriod(fullHistory, period), period, trendUp);
   if (chartUrl) embed.image = { url: chartUrl };
 
   return embed;
+}
+
+// Only counts positions where shares are actually known — a category can mix tracked-only
+// tickers (no shares) with real holdings, so the total reflects just the latter.
+export function buildPortfolioTotalEmbed(
+  quotes: { quote: StockQuote; shares: number | null }[],
+): DiscordEmbed | null {
+  const held = quotes.filter((q) => q.shares && q.shares > 0);
+  if (held.length === 0) return null;
+
+  const total = held.reduce((sum, q) => sum + q.shares! * q.quote.price, 0);
+  const totalChange = held.reduce((sum, q) => sum + q.shares! * q.quote.change, 0);
+  const trendUp = totalChange >= 0;
+  const sign = trendUp ? "+" : "";
+
+  return {
+    title: `${trendUp ? "⬆️" : "⬇️"} Valeur totale du portefeuille`,
+    color: trendUp ? 0x16a34a : 0xdc2626,
+    description: `**${total.toFixed(2)} €**  (${sign}${totalChange.toFixed(2)} € aujourd'hui)`,
+  };
 }

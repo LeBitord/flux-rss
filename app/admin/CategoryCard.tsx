@@ -163,6 +163,7 @@ export function CategoryCard({
                 <TableRow>
                   <TableHead>Position</TableHead>
                   <TableHead>Ticker</TableHead>
+                  <TableHead>Parts</TableHead>
                   <TableHead className="w-20"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -172,6 +173,9 @@ export function CategoryCard({
                     <TableCell className="font-medium">{position.label}</TableCell>
                     <TableCell className="text-muted-foreground font-mono text-xs">
                       {position.ticker}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">
+                      {position.shares ?? <span className="italic">—</span>}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">

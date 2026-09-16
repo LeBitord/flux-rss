@@ -65,6 +65,20 @@ export function EditPositionDialog({ position }: { position: StockPosition }) {
                 required
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor={`edit-position-shares-${position.id}`}>
+                Nombre de parts (facultatif)
+              </Label>
+              <Input
+                id={`edit-position-shares-${position.id}`}
+                name="shares"
+                type="number"
+                min="0"
+                step="any"
+                defaultValue={position.shares ?? ""}
+                placeholder="10"
+              />
+            </div>
           </div>
 
           <DialogFooter>

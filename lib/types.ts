@@ -29,6 +29,7 @@ export type StockPosition = {
   id: string;
   ticker: string;
   label: string;
+  shares: number | null;
   category_id: string;
   created_at: string;
 };

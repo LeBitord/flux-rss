@@ -11,7 +11,7 @@ import {
   type DiscordEmbed,
 } from "@/lib/discord-bot";
 import { getStockQuotesWithHistory, formatStockLine } from "@/lib/stocks";
-import { buildStockEmbed } from "@/lib/stock-embed";
+import { buildStockEmbed, buildPortfolioTotalEmbed } from "@/lib/stock-embed";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const maxDuration = 300;
@@ -410,10 +410,10 @@ export async function GET(req: Request) {
 
   // Group tracked positions by category — each gets its own chart-embed message,
   // independent of whether a news digest also fires for that category today.
-  const positionsByCategory = new Map<string, { ticker: string; label: string }[]>();
+  const positionsByCategory = new Map<string, StockPosition[]>();
   for (const position of positionList) {
     const bucket = positionsByCategory.get(position.category_id) ?? [];
-    bucket.push({ ticker: position.ticker, label: position.label });
+    bucket.push(position);
     positionsByCategory.set(position.category_id, bucket);
   }
 
@@ -421,7 +421,10 @@ export async function GET(req: Request) {
   const allStockLines: string[] = [];
   for (const [categoryId, positionsInCategory] of positionsByCategory) {
     try {
-      const results = await getStockQuotesWithHistory(positionsInCategory);
+      const sharesByTicker = new Map(positionsInCategory.map((p) => [p.ticker, p.shares]));
+      const results = await getStockQuotesWithHistory(
+        positionsInCategory.map((p) => ({ ticker: p.ticker, label: p.label })),
+      );
       if (results.length === 0) continue;
 
       allStockLines.push(...results.map((r) => formatStockLine(r.quote)));
@@ -440,8 +443,14 @@ export async function GET(req: Request) {
         );
 
       const embeds = await Promise.all(
-        results.map(({ quote, history }) => buildStockEmbed(quote, history, "month")),
+        results.map(({ quote, history }) =>
+          buildStockEmbed(quote, history, "month", sharesByTicker.get(quote.ticker) ?? null),
+        ),
       );
+      const totalEmbed = buildPortfolioTotalEmbed(
+        results.map(({ quote }) => ({ quote, shares: sharesByTicker.get(quote.ticker) ?? null })),
+      );
+      if (totalEmbed) embeds.push(totalEmbed);
       stockEmbedsByCategory.set(categoryId, embeds);
     } catch (err) {
       errors.push({

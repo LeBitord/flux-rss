@@ -180,14 +180,19 @@ export async function createPosition(formData: FormData) {
   const ticker = String(formData.get("ticker") ?? "").trim().toUpperCase();
   const label = String(formData.get("label") ?? "").trim();
   const categoryId = String(formData.get("category_id") ?? "");
+  const sharesRaw = String(formData.get("shares") ?? "").trim();
+  const shares = sharesRaw ? parseFloat(sharesRaw) : null;
 
   if (!ticker || !label || !categoryId) {
     throw new Error("Ticker, libellé et catégorie requis");
   }
+  if (shares !== null && (Number.isNaN(shares) || shares < 0)) {
+    throw new Error("Nombre de parts invalide");
+  }
 
   const { error } = await supabaseAdmin()
     .from("stock_positions")
-    .insert({ ticker, label, category_id: categoryId });
+    .insert({ ticker, label, category_id: categoryId, shares });
 
   if (error) throw new Error(error.message);
 
@@ -200,14 +205,19 @@ export async function updatePosition(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const ticker = String(formData.get("ticker") ?? "").trim().toUpperCase();
   const label = String(formData.get("label") ?? "").trim();
+  const sharesRaw = String(formData.get("shares") ?? "").trim();
+  const shares = sharesRaw ? parseFloat(sharesRaw) : null;
 
   if (!id || !ticker || !label) {
     throw new Error("Ticker et libellé requis");
   }
+  if (shares !== null && (Number.isNaN(shares) || shares < 0)) {
+    throw new Error("Nombre de parts invalide");
+  }
 
   const { error } = await supabaseAdmin()
     .from("stock_positions")
-    .update({ ticker, label })
+    .update({ ticker, label, shares })
     .eq("id", id);
 
   if (error) throw new Error(error.message);
