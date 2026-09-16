@@ -52,14 +52,41 @@ export async function GET(req: Request) {
     const destinationChannel = briefingChannelId ?? category.discord_channel_id;
     if (!destinationChannel) continue;
 
+    // Stored so the apply/dismiss buttons below can retrieve the full text later —
+    // Discord custom_id is capped at 100 chars, far too short for the suggestion itself.
+    await db
+      .from("categories")
+      .update({ pending_relevance_suggestion: suggestion.suggestedContext })
+      .eq("id", category.id);
+
     const content =
       `💡 **Suggestion de contexte — ${category.name}**\n` +
       `${suggestion.reasoning}\n\n` +
       `Actuel : ${category.relevance_context || "_(aucun)_"}\n` +
-      `Proposé : ${suggestion.suggestedContext}\n\n` +
-      "_Pas appliqué automatiquement — modifie-le dans l'admin si tu es d'accord._";
+      `Proposé : ${suggestion.suggestedContext}`;
 
-    const result = await sendBotMessage(destinationChannel, { content: content.slice(0, 2000) });
+    const result = await sendBotMessage(destinationChannel, {
+      content: content.slice(0, 2000),
+      components: [
+        {
+          type: 1,
+          components: [
+            {
+              type: 2,
+              style: 3,
+              label: "✅ Appliquer",
+              custom_id: `relsug:apply:${category.id}`,
+            },
+            {
+              type: 2,
+              style: 2,
+              label: "❌ Ignorer",
+              custom_id: `relsug:dismiss:${category.id}`,
+            },
+          ],
+        },
+      ],
+    });
     if (result.ok) {
       suggestionsSent += 1;
     } else {

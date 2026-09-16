@@ -59,6 +59,55 @@ export async function POST(req: Request) {
 
   if (body.type === InteractionType.MESSAGE_COMPONENT) {
     const customId: string = body.data?.custom_id ?? "";
+
+    if (customId.startsWith("relsug:")) {
+      const [, action, categoryId] = customId.split(":");
+      if ((action !== "apply" && action !== "dismiss") || !categoryId) {
+        return Response.json({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { content: "Bouton non reconnu.", flags: InteractionResponseFlags.EPHEMERAL },
+        });
+      }
+
+      const db = supabaseAdmin();
+      const { data: category } = await db
+        .from("categories")
+        .select("pending_relevance_suggestion")
+        .eq("id", categoryId)
+        .maybeSingle();
+
+      const pending = category?.pending_relevance_suggestion as string | null | undefined;
+      if (!pending) {
+        return Response.json({
+          type: InteractionResponseType.UPDATE_MESSAGE,
+          data: {
+            content: "Cette suggestion n'est plus disponible (déjà traitée ?).",
+            components: [],
+          },
+        });
+      }
+
+      await db
+        .from("categories")
+        .update(
+          action === "apply"
+            ? { relevance_context: pending, pending_relevance_suggestion: null }
+            : { pending_relevance_suggestion: null },
+        )
+        .eq("id", categoryId);
+
+      return Response.json({
+        type: InteractionResponseType.UPDATE_MESSAGE,
+        data: {
+          content:
+            action === "apply"
+              ? `✅ Contexte mis à jour :\n${pending}`
+              : "❌ Suggestion ignorée.",
+          components: [],
+        },
+      });
+    }
+
     const [prefix, direction, seenItemId] = customId.split(":");
 
     if (prefix !== "fb" || (direction !== "up" && direction !== "down") || !seenItemId) {

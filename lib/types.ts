@@ -6,6 +6,7 @@ export type Category = {
   color: string;
   relevance_context: string | null;
   last_relevance_suggestion_at: string | null;
+  pending_relevance_suggestion: string | null;
   created_at: string;
 };
 
