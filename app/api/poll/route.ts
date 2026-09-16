@@ -28,6 +28,8 @@ const MAX_FEEDBACK_BUTTONS = 5; // Discord caps messages at 5 action rows; one r
 const UNHEALTHY_ERROR_STREAK = 3;
 const UNHEALTHY_SILENCE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days without a single new item
 const HEALTH_ALERT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // re-alert on the same feed at most weekly
+const AUTO_DISABLE_ERROR_STREAK = 10;
+const AUTO_DISABLE_SILENCE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days without a single new item
 
 const parser = new Parser({ timeout: 15000 });
 const MAX_EMBEDS_PER_MESSAGE = 10;
@@ -238,6 +240,33 @@ async function sendFeedHealthAlert(feeds: Feed[]) {
     });
   } catch (err) {
     console.error("Failed to send feed health alert:", err);
+  }
+}
+
+async function sendFeedDisabledAlert(feeds: Feed[]) {
+  const webhookUrl = process.env.ALERTS_DISCORD_WEBHOOK_URL;
+  if (!webhookUrl || feeds.length === 0) return;
+
+  const lines = feeds.map((feed) => {
+    const reason =
+      feed.consecutive_errors >= AUTO_DISABLE_ERROR_STREAK
+        ? `${feed.consecutive_errors} échecs consécutifs`
+        : "aucun nouvel article depuis 30+ jours";
+    return `• **${feed.name}** — ${reason}`;
+  });
+  const content =
+    `🔌 **Flux RSS — ${feeds.length} flux désactivé(s) automatiquement**\n` +
+    lines.join("\n") +
+    "\nRéactivable dans l'admin si la source revient.";
+
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: content.slice(0, 2000) }),
+    });
+  } catch (err) {
+    console.error("Failed to send feed disabled alert:", err);
   }
 }
 
@@ -515,7 +544,34 @@ export async function GET(req: Request) {
     .select("*")
     .eq("active", true);
   const now = Date.now();
-  const unhealthyFeeds = ((healthFeeds ?? []) as Feed[]).filter((feed) => {
+  const activeHealthFeeds = (healthFeeds ?? []) as Feed[];
+
+  // Well past the "please check this" threshold — deactivate outright instead of
+  // alerting forever about a source that's been broken or silent for a month.
+  const toDisable = activeHealthFeeds.filter((feed) => {
+    const errorsExceeded = feed.consecutive_errors >= AUTO_DISABLE_ERROR_STREAK;
+    const tooYoungToJudge = now - new Date(feed.created_at).getTime() < AUTO_DISABLE_SILENCE_MS;
+    const silent =
+      !tooYoungToJudge &&
+      (!feed.last_new_item_at ||
+        now - new Date(feed.last_new_item_at).getTime() > AUTO_DISABLE_SILENCE_MS);
+    return errorsExceeded || silent;
+  });
+
+  if (toDisable.length > 0) {
+    await db
+      .from("feeds")
+      .update({ active: false })
+      .in(
+        "id",
+        toDisable.map((f) => f.id),
+      );
+    await sendFeedDisabledAlert(toDisable);
+  }
+
+  const disabledIds = new Set(toDisable.map((f) => f.id));
+  const unhealthyFeeds = activeHealthFeeds.filter((feed) => {
+    if (disabledIds.has(feed.id)) return false; // already handled above, don't double-alert
     const errorsExceeded = feed.consecutive_errors >= UNHEALTHY_ERROR_STREAK;
     // Grace period: a feed younger than the silence window hasn't had a fair chance yet.
     const tooYoungToJudge = now - new Date(feed.created_at).getTime() < UNHEALTHY_SILENCE_MS;
