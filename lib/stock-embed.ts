@@ -1,46 +1,102 @@
 import type { DiscordEmbed } from "./discord-bot";
-import type { StockQuote } from "./stocks";
+import type { StockQuote, DailyClose } from "./stocks";
 
-export type PricePoint = { trade_date: string; price: number };
+export type ChartPeriod = "day" | "week" | "month";
+
+const PERIOD_LABEL: Record<ChartPeriod, string> = {
+  day: "7 derniers jours",
+  week: "Vue hebdomadaire",
+  month: "Vue mensuelle",
+};
+
+// Same underlying ~100-day daily series (Alpha Vantage free tier's max depth), sliced or
+// grouped differently depending on the requested zoom level.
+export function aggregateByPeriod(history: DailyClose[], period: ChartPeriod): DailyClose[] {
+  if (period === "day") return history.slice(-7);
+
+  if (period === "week") {
+    const byWeek = new Map<string, DailyClose>();
+    for (const point of history) {
+      const date = new Date(point.date);
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - ((date.getDay() + 6) % 7)); // Monday of that week
+      byWeek.set(weekStart.toISOString().slice(0, 10), point); // last write wins = latest close of the week
+    }
+    return [...byWeek.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-12)
+      .map(([, point]) => point);
+  }
+
+  // month
+  const byMonth = new Map<string, DailyClose>();
+  for (const point of history) {
+    byMonth.set(point.date.slice(0, 7), point); // last write wins = latest close of the month
+  }
+  return [...byMonth.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, point]) => point);
+}
 
 const QUICKCHART_CREATE_URL = "https://quickchart.io/chart/create";
 
-// Merge today's live quote into the historical series — stock_price_history may not have
-// today's row yet (poll writes it in the same run that calls this, before or after
-// depending on call order; /cours never writes it at all), so this guarantees the chart
-// always ends on the price actually shown in the embed.
-export function withLatestPoint(history: PricePoint[], quote: StockQuote): PricePoint[] {
-  const withoutToday = history.filter((h) => h.trade_date !== quote.latestTradingDay);
-  return [...withoutToday, { trade_date: quote.latestTradingDay, price: quote.price }].sort(
-    (a, b) => a.trade_date.localeCompare(b.trade_date),
-  );
-}
-
-async function buildChartUrl(history: PricePoint[], trendUp: boolean): Promise<string | null> {
+async function buildChartUrl(
+  history: DailyClose[],
+  period: ChartPeriod,
+  trendUp: boolean,
+): Promise<string | null> {
   if (history.length < 2) return null; // a single point isn't a chart
 
-  const color = trendUp ? "#2ecc71" : "#e74c3c";
+  const lineColor = trendUp ? "#16a34a" : "#dc2626";
+  const fillColor = trendUp ? "rgba(22, 163, 74, 0.12)" : "rgba(220, 38, 38, 0.12)";
+
+  const labelFormat: Intl.DateTimeFormatOptions =
+    period === "month" ? { month: "short", year: "2-digit" } : { day: "2-digit", month: "short" };
+
   const config = {
     type: "line",
     data: {
-      labels: history.map((h) => h.trade_date.slice(5)), // MM-DD
+      labels: history.map((h) => new Date(h.date).toLocaleDateString("fr-FR", labelFormat)),
       datasets: [
         {
-          data: history.map((h) => h.price),
-          borderColor: color,
-          backgroundColor: `${color}33`,
+          data: history.map((h) => h.close),
+          borderColor: lineColor,
+          backgroundColor: fillColor,
           fill: true,
           pointRadius: 0,
-          borderWidth: 2,
-          tension: 0.25,
+          pointHoverRadius: 0,
+          borderWidth: 2.5,
+          tension: 0.35,
+          cubicInterpolationMode: "monotone",
         },
       ],
     },
     options: {
-      plugins: { legend: { display: false } },
+      layout: { padding: { top: 8, right: 12, bottom: 4, left: 4 } },
+      plugins: {
+        legend: { display: false },
+        title: {
+          display: true,
+          text: PERIOD_LABEL[period],
+          font: { size: 13, weight: "normal" },
+          color: "#6b7280",
+          padding: { bottom: 10 },
+        },
+      },
+      elements: { line: { capBezierPoints: true } },
       scales: {
-        x: { ticks: { maxTicksLimit: 6, font: { size: 10 } } },
-        y: { ticks: { font: { size: 10 } } },
+        x: {
+          grid: { display: false },
+          ticks: { maxTicksLimit: 6, font: { size: 11 }, color: "#9ca3af" },
+        },
+        y: {
+          grid: { color: "#f0f0f0" },
+          ticks: {
+            font: { size: 11 },
+            color: "#9ca3af",
+            callback: "function(v) { return v.toFixed(0) + ' €'; }",
+          },
+        },
       },
     },
   };
@@ -51,9 +107,11 @@ async function buildChartUrl(history: PricePoint[], trendUp: boolean): Promise<s
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chart: config,
-        width: 400,
-        height: 180,
+        width: 520,
+        height: 220,
         backgroundColor: "white",
+        version: "4",
+        devicePixelRatio: 2,
       }),
     });
     if (!res.ok) return null;
@@ -67,12 +125,13 @@ async function buildChartUrl(history: PricePoint[], trendUp: boolean): Promise<s
 
 export async function buildStockEmbed(
   quote: StockQuote,
-  history: PricePoint[],
+  fullHistory: DailyClose[],
+  period: ChartPeriod = "month",
 ): Promise<DiscordEmbed> {
   const trendUp = quote.change >= 0;
   const arrow = trendUp ? "⬆️" : "⬇️";
   const sign = trendUp ? "+" : "";
-  const color = trendUp ? 0x2ecc71 : 0xe74c3c;
+  const color = trendUp ? 0x16a34a : 0xdc2626;
 
   const embed: DiscordEmbed = {
     title: `${arrow} ${quote.label}`,
@@ -82,7 +141,7 @@ export async function buildStockEmbed(
       `\`${quote.ticker}\``,
   };
 
-  const chartUrl = await buildChartUrl(history, trendUp);
+  const chartUrl = await buildChartUrl(aggregateByPeriod(fullHistory, period), period, trendUp);
   if (chartUrl) embed.image = { url: chartUrl };
 
   return embed;

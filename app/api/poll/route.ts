@@ -10,8 +10,8 @@ import {
   type DiscordButton,
   type DiscordEmbed,
 } from "@/lib/discord-bot";
-import { getStockQuotes, formatStockLine, type StockQuote } from "@/lib/stocks";
-import { buildStockEmbed, withLatestPoint, type PricePoint } from "@/lib/stock-embed";
+import { getStockQuotesWithHistory, formatStockLine } from "@/lib/stocks";
+import { buildStockEmbed } from "@/lib/stock-embed";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const maxDuration = 300;
@@ -421,47 +421,26 @@ export async function GET(req: Request) {
   const allStockLines: string[] = [];
   for (const [categoryId, positionsInCategory] of positionsByCategory) {
     try {
-      const quotes = await getStockQuotes(positionsInCategory);
-      if (quotes.length === 0) continue;
+      const results = await getStockQuotesWithHistory(positionsInCategory);
+      if (results.length === 0) continue;
 
-      allStockLines.push(...quotes.map(formatStockLine));
+      allStockLines.push(...results.map((r) => formatStockLine(r.quote)));
 
-      // Feeds the weekly position summary — no extra API calls, just persisting what
-      // was already fetched for today's digest.
+      // Feeds the weekly position summary — no extra API calls, just persisting today's
+      // close from the daily series already fetched above.
       await db
         .from("stock_price_history")
         .upsert(
-          quotes.map((q) => ({
-            ticker: q.ticker,
-            trade_date: q.latestTradingDay,
-            price: q.price,
+          results.map(({ quote }) => ({
+            ticker: quote.ticker,
+            trade_date: quote.latestTradingDay,
+            price: quote.price,
           })),
           { onConflict: "ticker,trade_date", ignoreDuplicates: true },
         );
 
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const { data: historyRows } = await db
-        .from("stock_price_history")
-        .select("ticker, trade_date, price")
-        .in(
-          "ticker",
-          quotes.map((q) => q.ticker),
-        )
-        .gte("trade_date", since)
-        .order("trade_date", { ascending: true });
-
-      const historyByTicker = new Map<string, PricePoint[]>();
-      for (const row of historyRows ?? []) {
-        const bucket = historyByTicker.get(row.ticker as string) ?? [];
-        bucket.push({ trade_date: row.trade_date as string, price: row.price as number });
-        historyByTicker.set(row.ticker as string, bucket);
-      }
-
       const embeds = await Promise.all(
-        quotes.map((quote) => {
-          const history = withLatestPoint(historyByTicker.get(quote.ticker) ?? [], quote);
-          return buildStockEmbed(quote, history);
-        }),
+        results.map(({ quote, history }) => buildStockEmbed(quote, history, "month")),
       );
       stockEmbedsByCategory.set(categoryId, embeds);
     } catch (err) {

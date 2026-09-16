@@ -6,8 +6,8 @@ import {
   verifyKey,
 } from "discord-interactions";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { getStockQuotes } from "@/lib/stocks";
-import { buildStockEmbed, withLatestPoint, type PricePoint } from "@/lib/stock-embed";
+import { getStockQuotesWithHistory } from "@/lib/stocks";
+import { buildStockEmbed, type ChartPeriod } from "@/lib/stock-embed";
 import type { DiscordEmbed } from "@/lib/discord-bot";
 
 const DISCORD_API = "https://discord.com/api/v10";
@@ -264,6 +264,10 @@ export async function POST(req: Request) {
     const channelId: string | undefined = body.channel_id;
     const applicationId: string | undefined = body.application_id;
     const token: string | undefined = body.token;
+    const periodOption = (body.data?.options ?? []).find(
+      (o: { name: string; value: string }) => o.name === "periode",
+    )?.value as ChartPeriod | undefined;
+    const period: ChartPeriod = periodOption ?? "month";
 
     // Discord requires an ack within 3s. Even the category/ticker lookup can blow that
     // budget on a cold start, so defer FIRST and do every bit of work — DB included — in
@@ -292,38 +296,12 @@ export async function POST(req: Request) {
             if (positions.length === 0) {
               content = `Aucun ticker boursier configuré pour **${category.name}**.`;
             } else {
-              const quotes = await getStockQuotes(positions);
-              if (quotes.length === 0) {
+              const results = await getStockQuotesWithHistory(positions);
+              if (results.length === 0) {
                 content = "Impossible de récupérer les cours pour le moment.";
               } else {
-                const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-                  .toISOString()
-                  .slice(0, 10);
-                const { data: historyRows } = await db
-                  .from("stock_price_history")
-                  .select("ticker, trade_date, price")
-                  .in(
-                    "ticker",
-                    quotes.map((q) => q.ticker),
-                  )
-                  .gte("trade_date", since)
-                  .order("trade_date", { ascending: true });
-
-                const historyByTicker = new Map<string, PricePoint[]>();
-                for (const row of historyRows ?? []) {
-                  const bucket = historyByTicker.get(row.ticker as string) ?? [];
-                  bucket.push({ trade_date: row.trade_date as string, price: row.price as number });
-                  historyByTicker.set(row.ticker as string, bucket);
-                }
-
                 embeds = await Promise.all(
-                  quotes.map((quote) => {
-                    const history = withLatestPoint(
-                      historyByTicker.get(quote.ticker) ?? [],
-                      quote,
-                    );
-                    return buildStockEmbed(quote, history);
-                  }),
+                  results.map(({ quote, history }) => buildStockEmbed(quote, history, period)),
                 );
               }
             }
