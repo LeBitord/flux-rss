@@ -102,6 +102,22 @@ export function EditCategoryDialog({ category }: { category: Category }) {
                 vous, pas juste l&apos;importance générique du sujet.
               </p>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor={`edit-cat-min-score-${category.id}`}>Note minimale (1 à 10)</Label>
+              <Input
+                id={`edit-cat-min-score-${category.id}`}
+                name="min_score"
+                type="number"
+                min={1}
+                max={10}
+                defaultValue={category.min_score}
+                className="w-20"
+              />
+              <p className="text-xs text-muted-foreground">
+                Les articles notés en dessous sont regroupés en une liste compacte en bas du
+                message au lieu d&apos;être affichés en grand. 1 = tout afficher.
+              </p>
+            </div>
             <label className="flex items-start gap-2 text-sm">
               <input
                 type="checkbox"

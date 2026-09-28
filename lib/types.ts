@@ -8,6 +8,7 @@ export type Category = {
   last_relevance_suggestion_at: string | null;
   pending_relevance_suggestion: string | null;
   frequent_polling: boolean;
+  min_score: number;
   created_at: string;
 };
 

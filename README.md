@@ -10,7 +10,7 @@ Autour de ce noyau : notation de pertinence par IA avec boucle de feedback depui
 - **Polling quotidien** (`/api/poll`) : parsing des flux, déduplication par `guid`, filtre d'ancienneté (7 jours), mots-clés à inclure / à exclure par flux, puis regroupement des doublons inter-flux (titres similaires dans une même catégorie).
 - **Passages en journée** (`/api/poll-frequent`, vers 11h et 17h) pour les catégories qui l'activent dans l'admin : mêmes digests, sans cours ni briefing.
 - **Purge** : les articles datés de plus de 90 jours sont supprimés de `seen_items` à chaque passage (les articles sans date sont conservés, sinon ils seraient re-notifiés).
-- **Digest Discord par catégorie** : un message par salon, jusqu'à 10 embeds triés par pertinence, avec favicon de la source, résumé et image quand le flux en fournit.
+- **Digest Discord par catégorie** : un message par salon, articles triés par pertinence, avec favicon de la source, résumé et image quand le flux en fournit. Les articles notés sous la **note minimale** de la catégorie (4/10 par défaut, réglable dans l'admin) et le débordement au-delà de 10 sont regroupés en une liste compacte en bas du message.
 - **Santé des flux** : alerte si un flux échoue 3 fois de suite ou ne publie plus rien depuis 14 jours (au plus une fois par semaine) ; désactivation automatique après 10 échecs ou 30 jours de silence.
 - **Alerte d'échec** vers un salon dédié (webhook) quand un flux, un envoi Discord ou une étape du passage plante.
 
@@ -37,7 +37,7 @@ Autour de ce noyau : notation de pertinence par IA avec boucle de feedback depui
 - `/recap` : les 10 articles les mieux notés des 3 derniers jours pour la catégorie du salon.
 - `/cours [periode]` : cours et graphiques (jour / semaine / mois) des positions de la catégorie du salon.
 - `/cherche <mots>` : retrouve un article déjà reçu (titre), toutes catégories.
-- `/resume <lien>` : résumé en français d'un article à partir de son URL.
+- `/resume <lien>` : résumé en français d'un article à partir de son URL. Les liens Google Actualités sont d'abord convertis en lien direct vers l'article (mécanisme interne de Google, susceptible de changer).
 
 ### Administration (`/admin`)
 - Gestion des catégories (salon Discord, couleur, contexte de pertinence, passages en journée), des flux (URL, mots-clés, activation), des positions boursières / transactions / prix cibles et des équipes suivies.

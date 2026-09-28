@@ -28,16 +28,21 @@ export function buildFeedbackRows(seenItemIds: string[]): DiscordActionRow[] {
 
 export const SUMMARY_MENU_ID = "sum";
 const MENU_LABEL_MAX = 100; // Discord cap on select option labels
+const MENU_OPTIONS_MAX = 25; // Discord cap on select options
 
 // A select menu in the last free row: pick an article, get its summary — same as /resume
-// without copying the link.
-export function buildSummaryMenu(items: { seenItemId: string; title: string }[]): DiscordActionRow {
+// without copying the link. The first `numberedCount` items are numbered like the embeds;
+// the rest (the compact list) get a bullet.
+export function buildSummaryMenu(
+  items: { seenItemId: string; title: string }[],
+  numberedCount: number = items.length,
+): DiscordActionRow {
   const menu: DiscordSelectMenu = {
     type: 3,
     custom_id: SUMMARY_MENU_ID,
     placeholder: "📝 Résumer un article…",
-    options: items.map((item, i) => ({
-      label: `${i + 1}. ${item.title}`.slice(0, MENU_LABEL_MAX),
+    options: items.slice(0, MENU_OPTIONS_MAX).map((item, i) => ({
+      label: `${i < numberedCount ? `${i + 1}.` : "·"} ${item.title}`.slice(0, MENU_LABEL_MAX),
       value: item.seenItemId,
     })),
   };

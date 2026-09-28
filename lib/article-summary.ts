@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { google } from "@ai-sdk/google";
 import { safeFetchText } from "@/lib/safe-fetch";
+import { googleNewsArticleId, resolveGoogleNewsLink } from "@/lib/google-news";
 
 const MAX_TEXT_CHARS = 15_000; // plenty for an article, keeps the prompt cheap
 
@@ -45,14 +46,26 @@ async function fetchPage(url: string): Promise<string> {
 
 export async function summarizeArticle(
   url: string,
-): Promise<{ ok: true; title: string | null; summary: string } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; url: string; title: string | null; summary: string } | { ok: false; error: string }
+> {
   if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
     return { ok: false, error: "Clé Gemini non configurée." };
   }
 
+  // Google News links only lead to a JavaScript redirect (or a consent page in the EU).
+  let articleUrl = url;
+  if (googleNewsArticleId(url)) {
+    const resolved = await resolveGoogleNewsLink(url);
+    if (!resolved) {
+      return { ok: false, error: "Impossible de retrouver l'article derrière ce lien Google Actualités." };
+    }
+    articleUrl = resolved;
+  }
+
   let page: { title: string | null; text: string };
   try {
-    page = extractArticleText(await fetchPage(url));
+    page = extractArticleText(await fetchPage(articleUrl));
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -74,7 +87,7 @@ export async function summarizeArticle(
         "Si le texte ne ressemble pas à un article, dis-le en une phrase au lieu d'inventer.",
       prompt: `Titre de la page : ${page.title ?? "(inconnu)"}\n\nTexte :\n${page.text}`,
     });
-    return { ok: true, title: page.title, summary: text.trim() };
+    return { ok: true, url: articleUrl, title: page.title, summary: text.trim() };
   } catch (err) {
     console.error("Article summary failed:", err);
     return { ok: false, error: "Le résumé a échoué côté IA." };

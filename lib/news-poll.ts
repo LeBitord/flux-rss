@@ -3,7 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Category, Feed } from "@/lib/types";
 import { assertPublicHttpUrl } from "@/lib/url-safety";
 import { scoreRelevance } from "@/lib/relevance";
-import { sendBotMessage } from "@/lib/discord-bot";
+import { sendBotMessage, type DiscordEmbed } from "@/lib/discord-bot";
+import { formatCompactList, layoutDigest } from "@/lib/digest-layout";
 import { buildFeedbackRows, buildSummaryMenu } from "@/lib/feedback-buttons";
 import {
   dedupeByTitle,
@@ -32,7 +33,6 @@ export type PollError = { feed: string; error: string };
 
 const HIGH_RELEVANCE_THRESHOLD = 8;
 const parser = new Parser({ timeout: 15000 });
-const MAX_EMBEDS_PER_MESSAGE = 10;
 
 function hexToInt(hex: string): number {
   const parsed = parseInt(hex.replace("#", ""), 16);
@@ -53,10 +53,9 @@ async function sendCategoryDigest(
   }
 
   const color = hexToInt(category.color);
-  const shown = items.slice(0, MAX_EMBEDS_PER_MESSAGE);
-  const overflow = items.length - shown.length;
+  const { featured, compact, belowThreshold } = layoutDigest(items, category.min_score);
 
-  const embeds = shown.map((item, i) => {
+  const embeds: DiscordEmbed[] = featured.map((item, i) => {
     const isFire = (item.score ?? 0) >= HIGH_RELEVANCE_THRESHOLD;
     const prefix = isFire ? `🔥 ${i + 1}.` : `${i + 1}.`;
     return {
@@ -69,13 +68,24 @@ async function sendCategoryDigest(
       thumbnail: item.imageUrl ? { url: item.imageUrl } : undefined,
     };
   });
+  if (compact.length > 0) {
+    embeds.push({
+      title: `➕ ${compact.length} autre(s) article(s)`,
+      color,
+      description: formatCompactList(compact),
+    });
+  }
 
-  const components = buildFeedbackRows(shown.map((item) => item.seenItemId));
-  if (components.length < 5) components.push(buildSummaryMenu(shown)); // Discord: 5 rows max
+  const components = buildFeedbackRows(featured.map((item) => item.seenItemId));
+  // Discord allows 5 rows; the menu also covers the compact list, numbered ones first.
+  if (components.length < 5) components.push(buildSummaryMenu([...featured, ...compact], featured.length));
 
+  const minorNote =
+    belowThreshold > 0 ? ` · ${belowThreshold} jugé(s) mineur(s) (note < ${category.min_score}), en bas` : "";
   const content =
-    `**${category.name}** — ${items.length} nouvel(le)(s) article(s)` +
-    (overflow > 0 ? `\n…et ${overflow} autre(s) non affiché(s).` : "");
+    featured.length > 0
+      ? `**${category.name}** — ${items.length} nouvel(le)(s) article(s)${minorNote}`
+      : `**${category.name}** — rien de marquant, ${items.length} article(s) mineur(s)`;
 
   return sendBotMessage(category.discord_channel_id, { content, embeds, components });
 }
@@ -209,8 +219,8 @@ export async function scoreAndSendDigests(
     const category = categoryById.get(categoryId);
     if (!category) continue;
 
-    // Score with a fast/cheap model and sort highest-first, so if there are more
-    // items than MAX_EMBEDS_PER_MESSAGE, the most important ones are the ones kept.
+    // Score with a fast/cheap model and sort highest-first, so the best items get the
+    // full embeds and the rest go to the compact list.
     const results = await scoreRelevance(category.name, category.relevance_context, items);
     items.forEach((item, i) => {
       item.score = results[i].score;

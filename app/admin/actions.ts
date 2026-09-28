@@ -90,6 +90,10 @@ export async function updateCategory(formData: FormData) {
   const color = String(formData.get("color") ?? "#5865F2").trim();
   const relevanceContext = String(formData.get("relevance_context") ?? "").trim();
   const frequentPolling = formData.get("frequent_polling") === "on";
+  const minScore = parseInt(String(formData.get("min_score") ?? "4"), 10);
+  if (Number.isNaN(minScore) || minScore < 1 || minScore > 10) {
+    throw new Error("La note minimale doit être entre 1 et 10");
+  }
 
   if (!id || !name || !discordChannelId) {
     throw new Error("Nom et ID de salon Discord requis");
@@ -107,6 +111,7 @@ export async function updateCategory(formData: FormData) {
       color,
       relevance_context: relevanceContext || null,
       frequent_polling: frequentPolling,
+      min_score: minScore,
     })
     .eq("id", id);
 

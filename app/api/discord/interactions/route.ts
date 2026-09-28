@@ -183,7 +183,7 @@ export async function POST(req: Request) {
             embeds: [
               {
                 title: `📝 ${result.title ?? "Résumé"}`.slice(0, 256),
-                url: item.link as string,
+                url: result.url,
                 color: 0x5865f2,
                 description: result.summary.slice(0, 4096),
               },
@@ -431,7 +431,7 @@ export async function POST(req: Request) {
         embeds: [
           {
             title: `📝 ${result.title ?? "Résumé"}`.slice(0, 256),
-            url,
+            url: result.url,
             color: 0x5865f2,
             description: result.summary.slice(0, 4096),
           },
