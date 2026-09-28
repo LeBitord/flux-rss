@@ -7,33 +7,24 @@ const buttons = (rows: ReturnType<typeof buildFeedbackRows>) =>
   rows.map((r) => r.components as DiscordButton[]);
 
 describe("buildFeedbackRows", () => {
-  it("fits 10 articles in 4 rows of 5 buttons", () => {
-    const rows = buildFeedbackRows(ids(10));
-    expect(rows).toHaveLength(4);
-    expect(rows.every((r) => r.components.length === 5)).toBe(true);
-  });
-
-  it("puts 👍 rows before 👎 rows, numbered like the embeds", () => {
-    expect(buttons(buildFeedbackRows(ids(7))).map((r) => r.map((b) => b.label))).toEqual([
-      ["👍 1", "👍 2", "👍 3", "👍 4", "👍 5"],
-      ["👍 6", "👍 7"],
+  it("fits 10 articles in 2 rows of 5 👎 buttons, numbered like the embeds", () => {
+    const rows = buttons(buildFeedbackRows(ids(7)));
+    expect(rows.map((r) => r.map((b) => b.label))).toEqual([
       ["👎 1", "👎 2", "👎 3", "👎 4", "👎 5"],
       ["👎 6", "👎 7"],
     ]);
+    expect(buildFeedbackRows(ids(10))).toHaveLength(2);
   });
 
   it("encodes direction and item id in custom_id", () => {
-    const [upRow, downRow] = buttons(buildFeedbackRows(ids(3)));
-    expect(upRow.map((b) => b.custom_id)).toEqual(["fb:up:id1", "fb:up:id2", "fb:up:id3"]);
-    expect(downRow[2].custom_id).toBe("fb:down:id3");
+    expect(buttons(buildFeedbackRows(ids(2)))[0].map((b) => b.custom_id)).toEqual([
+      "fb:down:id1",
+      "fb:down:id2",
+    ]);
   });
 
   it("returns no rows when nothing is shown", () => {
     expect(buildFeedbackRows([])).toEqual([]);
-  });
-
-  it("never exceeds Discord's 5-row cap", () => {
-    expect(buildFeedbackRows(ids(15)).length).toBeLessThanOrEqual(5);
   });
 });
 
@@ -51,7 +42,12 @@ describe("buildSummaryMenu", () => {
 });
 
 describe("markVote", () => {
-  const rows = [...buildFeedbackRows(ids(2)), buildSummaryMenu([{ seenItemId: "id1", title: "A" }])];
+  // Older digests still carry 👍 buttons, so voting must handle both directions.
+  const upRow = {
+    type: 1 as const,
+    components: ids(2).map((id, i) => ({ type: 2 as const, style: 3 as const, label: `👍 ${i + 1}`, custom_id: `fb:up:${id}` })),
+  };
+  const rows = [upRow, ...buildFeedbackRows(ids(2)), buildSummaryMenu([{ seenItemId: "id1", title: "A" }])];
 
   it("checks the chosen button and greys its counterpart", () => {
     const [up, down] = buttons(markVote(rows, "id1", "up"));

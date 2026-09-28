@@ -16,7 +16,7 @@ Autour de ce noyau : notation de pertinence par IA avec boucle de feedback depui
 
 ### Pertinence IA (Gemini)
 - Chaque nouvel article est noté de 1 à 10 selon le **contexte de pertinence** propre à sa catégorie, et reçoit 1 à 3 mots-clés. Les articles ≥ 8 sont marqués 🔥.
-- **Boutons 👍/👎** sous chaque article du digest : 👎 ajoute les mots-clés de l'article aux `exclude_keywords` du flux ; 👍 les ajoute aux `keywords` seulement si le flux a déjà un filtre d'inclusion (sinon il restreindrait un flux qui accepte tout). Un seul vote par article : un nouveau clic identique est ignoré, un clic inverse remplace le vote. Le bouton choisi est coché et l'autre grisé.
+- **Bouton 👎** sous chaque article du digest : ajoute les mots-clés de l'article aux `exclude_keywords` du flux. Un seul vote par article ; le bouton cliqué est coché. (Les anciens messages ont encore des 👍, toujours pris en compte : ils n'ajoutent aux `keywords` que si le flux a déjà un filtre d'inclusion.) Chaque retour est journalisé.
 - **Menu « Résumer un article… »** sous chaque digest : résumé en français de l'article choisi, visible de vous seul.
 - **Suggestions de contexte** (hebdo) : dès qu'une catégorie a accumulé 5+ retours, l'IA propose une version affinée de son contexte de pertinence, avec boutons Appliquer / Ignorer sur Discord. Jamais appliqué automatiquement.
 - **Briefing matinal** : un paragraphe factuel par catégorie (en français, même pour les sources anglophones), plus les cours du jour.
