@@ -6,7 +6,7 @@ import {
   verifyKey,
 } from "discord-interactions";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { getStockQuotesWithHistory } from "@/lib/stocks";
+import { getStockQuotesWithHistory, StockApiLimitError } from "@/lib/stocks";
 import {
   buildStockEmbed,
   buildPortfolioTotalEmbed,
@@ -14,7 +14,8 @@ import {
   holdingFromPosition,
   type HoldingInfo,
 } from "@/lib/stock-embed";
-import type { DiscordEmbed } from "@/lib/discord-bot";
+import type { DiscordActionRow, DiscordEmbed } from "@/lib/discord-bot";
+import { markVote, SUMMARY_MENU_ID } from "@/lib/feedback-buttons";
 import { mergeKeywords, parseTerms } from "@/lib/feed-filters";
 import { summarizeArticle } from "@/lib/article-summary";
 
@@ -29,7 +30,8 @@ const SEARCH_LIMIT = 10;
 type InteractionBody = {
   application_id?: string;
   token?: string;
-  data?: { options?: { name: string; value: unknown }[] };
+  data?: { options?: { name: string; value: unknown }[]; values?: string[] };
+  message?: { components?: unknown[] };
 };
 
 function getOption(body: InteractionBody, name: string): unknown {
@@ -53,6 +55,7 @@ function escapeLike(term: string): string {
 function deferThen(
   body: InteractionBody,
   work: () => Promise<{ content?: string; embeds?: DiscordEmbed[] }>,
+  { ephemeral = false }: { ephemeral?: boolean } = {},
 ) {
   const { application_id: applicationId, token } = body;
   if (applicationId && token) {
@@ -62,7 +65,12 @@ function deferThen(
         payload = await work();
       } catch (err) {
         console.error("Deferred interaction failed:", err);
-        payload = { content: "Une erreur est survenue." };
+        payload = {
+          content:
+            err instanceof StockApiLimitError
+              ? "Quota Alpha Vantage atteint pour aujourd'hui — réessaie demain."
+              : "Une erreur est survenue.",
+        };
       }
       try {
         await fetch(`${DISCORD_API}/webhooks/${applicationId}/${token}/messages/@original`, {
@@ -75,7 +83,10 @@ function deferThen(
       }
     });
   }
-  return Response.json({ type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE });
+  return Response.json({
+    type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    data: ephemeral ? { flags: InteractionResponseFlags.EPHEMERAL } : undefined,
+  });
 }
 
 function hexToInt(hex: string): number {
@@ -155,30 +166,55 @@ export async function POST(req: Request) {
       });
     }
 
+    if (customId === SUMMARY_MENU_ID) {
+      const seenItemId = String(body.data?.values?.[0] ?? "");
+      return deferThen(
+        body,
+        async () => {
+          const { data: item } = await supabaseAdmin()
+            .from("seen_items")
+            .select("link")
+            .eq("id", seenItemId)
+            .maybeSingle();
+          if (!item?.link) return { content: "Article introuvable (trop ancien ?)." };
+          const result = await summarizeArticle(item.link as string);
+          if (!result.ok) return { content: `Impossible de résumer cet article : ${result.error}` };
+          return {
+            embeds: [
+              {
+                title: `📝 ${result.title ?? "Résumé"}`.slice(0, 256),
+                url: item.link as string,
+                color: 0x5865f2,
+                description: result.summary.slice(0, 4096),
+              },
+            ],
+          };
+        },
+        { ephemeral: true },
+      );
+    }
+
     const [prefix, direction, seenItemId] = customId.split(":");
 
     if (prefix !== "fb" || (direction !== "up" && direction !== "down") || !seenItemId) {
-      return Response.json({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: { content: "Bouton non reconnu.", flags: InteractionResponseFlags.EPHEMERAL },
-      });
+      return ephemeral("Bouton non reconnu.");
     }
 
     const db = supabaseAdmin();
-    const { data: seenItem } = await db
-      .from("seen_items")
-      .select("feed_id, topics")
-      .eq("id", seenItemId)
-      .maybeSingle();
+    const [{ data: seenItem }, { data: previousVote }] = await Promise.all([
+      db.from("seen_items").select("feed_id, topics").eq("id", seenItemId).maybeSingle(),
+      db
+        .from("feedback_log")
+        .select("id, direction")
+        .eq("seen_item_id", seenItemId)
+        .maybeSingle(),
+    ]);
 
-    if (!seenItem) {
-      return Response.json({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content: "Article introuvable (trop ancien ?).",
-          flags: InteractionResponseFlags.EPHEMERAL,
-        },
-      });
+    if (!seenItem) return ephemeral("Article introuvable (trop ancien ?).");
+
+    const emoji = direction === "up" ? "👍" : "👎";
+    if (previousVote?.direction === direction) {
+      return ephemeral(`${emoji} Déjà noté pour cet article.`);
     }
 
     const topics = (seenItem.topics ?? "")
@@ -186,15 +222,7 @@ export async function POST(req: Request) {
       .map((t: string) => t.trim())
       .filter(Boolean);
 
-    if (topics.length === 0) {
-      return Response.json({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content: "Pas de mot-clé exploitable pour cet article.",
-          flags: InteractionResponseFlags.EPHEMERAL,
-        },
-      });
-    }
+    if (topics.length === 0) return ephemeral("Pas de mot-clé exploitable pour cet article.");
 
     const { data: feed } = await db
       .from("feeds")
@@ -218,22 +246,50 @@ export async function POST(req: Request) {
 
       // Kept separately from the keyword merge above so the relevance-context suggestion
       // job can look at the raw feedback history even after keywords keep changing.
-      await db.from("feedback_log").insert({
-        category_id: feed.category_id,
-        direction,
-        topics: topics.join(", "),
+      // One row per article: changing one's mind replaces the vote instead of adding one.
+      if (previousVote) {
+        await db
+          .from("feedback_log")
+          .update({ direction, topics: topics.join(", "), created_at: new Date().toISOString() })
+          .eq("id", previousVote.id);
+      } else {
+        await db.from("feedback_log").insert({
+          category_id: feed.category_id,
+          seen_item_id: seenItemId,
+          direction,
+          topics: topics.join(", "),
+        });
+      }
+    }
+
+    let note = filterUpdated
+      ? `${emoji} Noté — "${topics.join(", ")}" ${direction === "up" ? "renforcé" : "exclu"} pour ce flux.`
+      : `${emoji} Noté — "${topics.join(", ")}" pris en compte pour affiner la pertinence.`;
+    if (previousVote) {
+      note += " Vote précédent remplacé (un mot-clé déjà ajouté au flux reste en place, à retirer dans l'admin si besoin).";
+    }
+
+    // Recolour the buttons in place, then confirm privately — an interaction gets exactly
+    // one initial response, so the confirmation goes out as a follow-up message.
+    const { application_id: applicationId, token } = body as InteractionBody;
+    if (applicationId && token) {
+      after(async () => {
+        try {
+          await fetch(`${DISCORD_API}/webhooks/${applicationId}/${token}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: note, flags: InteractionResponseFlags.EPHEMERAL }),
+          });
+        } catch (err) {
+          console.error("Failed to send feedback confirmation:", err);
+        }
       });
     }
 
-    const emoji = direction === "up" ? "👍" : "👎";
+    const rows = (body.message?.components ?? []) as DiscordActionRow[];
     return Response.json({
-      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-      data: {
-        content: filterUpdated
-          ? `${emoji} Noté — "${topics.join(", ")}" ${direction === "up" ? "renforcé" : "exclu"} pour ce flux.`
-          : `${emoji} Noté — "${topics.join(", ")}" pris en compte pour affiner la pertinence.`,
-        flags: InteractionResponseFlags.EPHEMERAL,
-      },
+      type: InteractionResponseType.UPDATE_MESSAGE,
+      data: { components: markVote(rows, seenItemId, direction) },
     });
   }
 

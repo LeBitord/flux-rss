@@ -19,9 +19,16 @@ export type DiscordButton = {
   custom_id: string;
 };
 
+export type DiscordSelectMenu = {
+  type: 3; // string select
+  custom_id: string;
+  placeholder?: string;
+  options: { label: string; value: string; description?: string }[];
+};
+
 export type DiscordActionRow = {
   type: 1;
-  components: DiscordButton[];
+  components: (DiscordButton | DiscordSelectMenu)[];
 };
 
 export async function sendBotMessage(

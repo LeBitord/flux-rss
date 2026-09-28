@@ -48,8 +48,13 @@ export const GET = cronHandler("weekly-recap", async () => {
   const benchmark = getBenchmarkConfig();
   let benchmarkChange: number | null = null;
   if (benchmark && positionList.length > 0) {
-    const result = await getStockQuoteWithHistory(benchmark.ticker, benchmark.label);
-    benchmarkChange = result ? changeSince(result.history, cutoff) : null;
+    try {
+      const result = await getStockQuoteWithHistory(benchmark.ticker, benchmark.label);
+      benchmarkChange = result ? changeSince(result.history, cutoff) : null;
+    } catch (err) {
+      // The comparison is a bonus line — never let it block the weekly summary.
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
   }
 
   for (const [categoryId, categoryPositions] of positionsByCategory) {

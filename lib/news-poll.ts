@@ -4,7 +4,7 @@ import type { Category, Feed } from "@/lib/types";
 import { assertPublicHttpUrl } from "@/lib/url-safety";
 import { scoreRelevance } from "@/lib/relevance";
 import { sendBotMessage } from "@/lib/discord-bot";
-import { buildFeedbackRows } from "@/lib/feedback-buttons";
+import { buildFeedbackRows, buildSummaryMenu } from "@/lib/feedback-buttons";
 import {
   dedupeByTitle,
   extractDescription,
@@ -71,6 +71,7 @@ async function sendCategoryDigest(
   });
 
   const components = buildFeedbackRows(shown.map((item) => item.seenItemId));
+  if (components.length < 5) components.push(buildSummaryMenu(shown)); // Discord: 5 rows max
 
   const content =
     `**${category.name}** — ${items.length} nouvel(le)(s) article(s)` +

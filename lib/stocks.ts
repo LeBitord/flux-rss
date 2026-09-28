@@ -9,6 +9,16 @@ export type StockQuote = {
 
 export type DailyClose = { date: string; close: number };
 
+// Alpha Vantage answers HTTP 200 with an "Information" / "Note" message instead of data
+// when the key is over its quota (free tier: 25 requests/day). Kept distinct from "no
+// data for this ticker" so a quota problem surfaces as a job failure instead of silence.
+export class StockApiLimitError extends Error {
+  constructor(message: string) {
+    super(`Quota Alpha Vantage atteint : ${message}`);
+    this.name = "StockApiLimitError";
+  }
+}
+
 // Alpha Vantage's free tier only allows outputsize=compact (last ~100 trading days,
 // roughly 5 months) — outputsize=full is a premium-only feature.
 async function fetchDailySeries(ticker: string): Promise<DailyClose[]> {
@@ -23,12 +33,17 @@ async function fetchDailySeries(ticker: string): Promise<DailyClose[]> {
 
     const data = await res.json();
     const series = data["Time Series (Daily)"];
-    if (!series) return [];
+    if (!series) {
+      const notice = data.Information ?? data.Note;
+      if (typeof notice === "string") throw new StockApiLimitError(notice.slice(0, 200));
+      return [];
+    }
 
     return Object.entries(series as Record<string, { "4. close": string }>)
       .map(([date, day]) => ({ date, close: parseFloat(day["4. close"]) }))
       .sort((a, b) => a.date.localeCompare(b.date));
   } catch (err) {
+    if (err instanceof StockApiLimitError) throw err;
     console.error(`Daily series fetch failed for ${ticker}:`, err);
     return [];
   }
@@ -69,7 +84,19 @@ export async function getStockQuotesWithHistory(
 ): Promise<{ quote: StockQuote; history: DailyClose[] }[]> {
   const results: { quote: StockQuote; history: DailyClose[] }[] = [];
   for (let i = 0; i < positions.length; i++) {
-    const result = await getStockQuoteWithHistory(positions[i].ticker, positions[i].label);
+    let result;
+    try {
+      result = await getStockQuoteWithHistory(positions[i].ticker, positions[i].label);
+    } catch (err) {
+      // Over quota: every further call would fail too. With nothing fetched, fail loudly;
+      // with a partial set, keep what we have (the daily digest still goes out).
+      if (err instanceof StockApiLimitError) {
+        if (results.length === 0) throw err;
+        console.error(`${err.message} — ${positions.length - i} ticker(s) skipped`);
+        break;
+      }
+      throw err;
+    }
     if (result) results.push(result);
     if (i < positions.length - 1) {
       await new Promise((r) => setTimeout(r, 1200));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,11 +23,13 @@ export function ChangePasswordDialog() {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState(changePassword, initialState);
 
-  useEffect(() => {
-    if (state.success) {
-      setOpen(false);
-    }
-  }, [state.success]);
+  // Close once per successful submission. Adjusting state during render (guarded by the
+  // last-seen state) instead of in an effect avoids an extra render pass.
+  const [handledState, setHandledState] = useState(state);
+  if (state !== handledState) {
+    setHandledState(state);
+    if (state.success) setOpen(false);
+  }
 
   return (
     <Dialog

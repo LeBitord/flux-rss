@@ -28,6 +28,12 @@ async function fetchRecentItems(since: string) {
   }
 }
 
+// Outside the component: the page is rendered per request (force-dynamic), so reading
+// the clock here is intended, but React's purity rule forbids it in a component body.
+function lookbackStart(): string {
+  return new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("fr-FR", {
@@ -41,7 +47,7 @@ function formatDateTime(iso: string | null | undefined): string {
 
 export default async function StatsPage() {
   const db = supabaseAdmin();
-  const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const since = lookbackStart();
 
   const [
     { data: categories },
