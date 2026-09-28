@@ -1,0 +1,17 @@
+name: Daytime poll
+
+on:
+  schedule:
+    # 09:00 and 15:00 UTC (11h / 17h Paris in summer, 10h / 16h in winter) — extra
+    # news-only passes for categories marked "vérifier aussi dans la journée".
+    - cron: "0 9,15 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call poll-frequent endpoint
+        run: |
+          curl -sf -X GET "https://flux-rss-fawn.vercel.app/api/poll-frequent" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

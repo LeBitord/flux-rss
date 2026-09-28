@@ -1,23 +1,43 @@
 import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import type { Category, Feed, StockPosition, PositionTransactionRow } from "@/lib/types";
+import type {
+  Category,
+  Feed,
+  StockPosition,
+  PositionTransactionRow,
+  PositionDividendRow,
+  SportsTeam,
+} from "@/lib/types";
 import { CategoryCard } from "./CategoryCard";
 import { NewCategoryDialog } from "./NewCategoryDialog";
+import { OpmlDialog } from "./OpmlDialog";
 import { LogoutButton } from "./LogoutButton";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { Button } from "@/components/ui/button";
 import { BarChart3 } from "lucide-react";
 
+// Data also changes outside the admin (Discord feedback, cron jobs), so never serve a
+// copy prerendered at build time.
+export const dynamic = "force-dynamic";
+
 export default async function AdminPage() {
   const db = supabaseAdmin();
 
-  const [{ data: categories }, { data: feeds }, { data: positions }, { data: transactions }] =
-    await Promise.all([
-      db.from("categories").select("*").order("name"),
-      db.from("feeds").select("*").order("name"),
-      db.from("stock_positions").select("*").order("label"),
-      db.from("position_transactions").select("*"),
-    ]);
+  const [
+    { data: categories },
+    { data: feeds },
+    { data: positions },
+    { data: transactions },
+    { data: dividends },
+    { data: teams },
+  ] = await Promise.all([
+    db.from("categories").select("*").order("name"),
+    db.from("feeds").select("*").order("name"),
+    db.from("stock_positions").select("*").order("label"),
+    db.from("position_transactions").select("*"),
+    db.from("position_dividends").select("*"),
+    db.from("sports_teams").select("*").order("name"),
+  ]);
 
   const categoryList = (categories ?? []) as Category[];
   const feedList = (feeds ?? []) as Feed[];
@@ -34,6 +54,18 @@ export default async function AdminPage() {
     const bucket = positionsByCategory.get(position.category_id) ?? [];
     bucket.push(position);
     positionsByCategory.set(position.category_id, bucket);
+  }
+  const teamsByCategory = new Map<string, SportsTeam[]>();
+  for (const team of (teams ?? []) as SportsTeam[]) {
+    const bucket = teamsByCategory.get(team.category_id) ?? [];
+    bucket.push(team);
+    teamsByCategory.set(team.category_id, bucket);
+  }
+  const dividendsByPosition = new Map<string, PositionDividendRow[]>();
+  for (const dividend of (dividends ?? []) as PositionDividendRow[]) {
+    const bucket = dividendsByPosition.get(dividend.position_id) ?? [];
+    bucket.push(dividend);
+    dividendsByPosition.set(dividend.position_id, bucket);
   }
   const transactionsByPosition = new Map<string, PositionTransactionRow[]>();
   for (const tx of transactionList) {
@@ -66,7 +98,8 @@ export default async function AdminPage() {
         </div>
       </header>
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <OpmlDialog categories={categoryList.map((c) => ({ id: c.id, name: c.name }))} />
         <NewCategoryDialog />
       </div>
 
@@ -83,6 +116,8 @@ export default async function AdminPage() {
               feeds={feedsByCategory.get(category.id) ?? []}
               positions={positionsByCategory.get(category.id) ?? []}
               transactionsByPosition={transactionsByPosition}
+              dividendsByPosition={dividendsByPosition}
+              teams={teamsByCategory.get(category.id) ?? []}
             />
           ))}
         </div>

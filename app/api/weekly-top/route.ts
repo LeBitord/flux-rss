@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { cronHandler } from "@/lib/cron-runs";
 import { sendBotMessage } from "@/lib/discord-bot";
 import type { Category, Feed } from "@/lib/types";
 
@@ -9,11 +9,7 @@ const LOOKBACK_DAYS = 7;
 const TOP_N = 15;
 const HIGH_RELEVANCE_THRESHOLD = 8;
 
-export async function GET(req: Request) {
-  if (!isAuthorizedCronRequest(req)) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
+export const GET = cronHandler("weekly-top", async () => {
   const destinationChannel = process.env.BRIEFING_DISCORD_CHANNEL_ID;
   if (!destinationChannel) {
     return Response.json({ ok: false, reason: "BRIEFING_DISCORD_CHANNEL_ID not configured" });
@@ -63,4 +59,4 @@ export async function GET(req: Request) {
   });
 
   return Response.json({ ok: result.ok, sent: result.ok, error: result.ok ? undefined : result.error });
-}
+});

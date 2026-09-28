@@ -1,0 +1,17 @@
+name: Cron health check
+
+on:
+  schedule:
+    # Daily 08:00 UTC — three hours after /api/poll (05:00), so a missed or failed
+    # morning pass is reported the same morning.
+    - cron: "0 8 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call cron-health endpoint
+        run: |
+          curl -sf -X GET "https://flux-rss-fawn.vercel.app/api/cron-health" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

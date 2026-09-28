@@ -29,8 +29,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
-import type { Category, Feed, StockPosition, PositionTransactionRow } from "@/lib/types";
-import { deleteCategory, deleteFeed, deletePosition } from "./actions";
+import type {
+  Category,
+  Feed,
+  StockPosition,
+  PositionTransactionRow,
+  PositionDividendRow,
+  SportsTeam,
+} from "@/lib/types";
+import { deleteCategory, deleteFeed, deletePosition, deleteTeam } from "./actions";
+import { NewTeamDialog } from "./NewTeamDialog";
 import { FeedActiveToggle } from "./FeedActiveToggle";
 import { NewFeedDialog } from "./NewFeedDialog";
 import { EditCategoryDialog } from "./EditCategoryDialog";
@@ -44,11 +52,15 @@ export function CategoryCard({
   feeds,
   positions,
   transactionsByPosition,
+  dividendsByPosition,
+  teams,
 }: {
   category: Category;
   feeds: Feed[];
   positions: StockPosition[];
   transactionsByPosition: Map<string, PositionTransactionRow[]>;
+  dividendsByPosition: Map<string, PositionDividendRow[]>;
+  teams: SportsTeam[];
 }) {
   return (
     <Card>
@@ -185,6 +197,7 @@ export function CategoryCard({
                         <TransactionDialog
                           position={position}
                           transactions={transactionsByPosition.get(position.id) ?? []}
+                          dividends={dividendsByPosition.get(position.id) ?? []}
                         />
                         <EditPositionDialog position={position} />
                         <form action={deletePosition}>
@@ -206,11 +219,37 @@ export function CategoryCard({
             </Table>
           </>
         )}
+
+        {teams.length > 0 && (
+          <>
+            <Separator className="my-4" />
+            <div className="flex flex-wrap gap-2">
+              {teams.map((team) => (
+                <form key={team.id} action={deleteTeam}>
+                  <input type="hidden" name="id" value={team.id} />
+                  <Badge variant="secondary" className="gap-1 pr-0.5">
+                    {team.emoji} {team.name}
+                    <Button
+                      type="submit"
+                      variant="ghost"
+                      size="icon"
+                      className="size-5 text-muted-foreground hover:text-destructive"
+                      aria-label={`Ne plus suivre ${team.name}`}
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </Badge>
+                </form>
+              ))}
+            </div>
+          </>
+        )}
       </CardContent>
 
-      <CardFooter className="flex items-center gap-2">
+      <CardFooter className="flex flex-wrap items-center gap-2">
         <NewFeedDialog categoryId={category.id} />
         <NewPositionDialog categoryId={category.id} />
+        <NewTeamDialog categoryId={category.id} />
       </CardFooter>
     </Card>
   );

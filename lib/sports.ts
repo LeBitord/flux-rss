@@ -1,8 +1,9 @@
 // TheSportsDB's public test key ("3") — free, no signup, no card. Rate-limited but
-// plenty for a weekly check on two teams. https://www.thesportsdb.com/free_sports_api
+// plenty for a daily check on a handful of teams. https://www.thesportsdb.com/free_sports_api
 const API_BASE = "https://www.thesportsdb.com/api/v1/json/3";
 
 export type SportEvent = {
+  id: string;
   date: string;
   time: string | null;
   homeTeam: string;
@@ -18,6 +19,7 @@ async function fetchEvents(kind: "next" | "last", teamId: string): Promise<Sport
     const data = await res.json();
     const raw: Record<string, unknown>[] = (kind === "next" ? data.events : data.results) ?? [];
     return raw.map((e) => ({
+      id: String(e.idEvent),
       date: e.dateEvent as string,
       time: (e.strTime as string) || null,
       homeTeam: e.strHomeTeam as string,
@@ -59,4 +61,33 @@ export function formatNextMatch(event: SportEvent, teamName: string): string {
   const location = isHome ? "domicile" : "extérieur";
   const time = event.time ? ` à ${event.time.slice(0, 5)}` : "";
   return `Prochain match — vs ${opponent} (${location}) le ${event.date}${time}`;
+}
+
+export type TeamSearchResult = { id: string; name: string; sport: string; league: string | null };
+
+export async function searchTeams(query: string): Promise<TeamSearchResult[]> {
+  const res = await fetch(`${API_BASE}/searchteams.php?t=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error(`TheSportsDB a répondu ${res.status}`);
+  const data = await res.json();
+  const raw: Record<string, unknown>[] = data.teams ?? [];
+  return raw.map((t) => ({
+    id: String(t.idTeam),
+    name: String(t.strTeam),
+    sport: String(t.strSport ?? ""),
+    league: (t.strLeague as string) || null,
+  }));
+}
+
+const SPORT_EMOJI: Record<string, string> = {
+  Rugby: "🏉",
+  Basketball: "🏀",
+  Soccer: "⚽",
+  "Ice Hockey": "🏒",
+  Handball: "🤾",
+  Volleyball: "🏐",
+  Tennis: "🎾",
+};
+
+export function sportEmoji(sport: string): string {
+  return SPORT_EMOJI[sport] ?? "🏅";
 }

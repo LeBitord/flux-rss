@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { cronHandler } from "@/lib/cron-runs";
 import { suggestRelevanceContextUpdate } from "@/lib/relevance";
 import { sendBotMessage } from "@/lib/discord-bot";
 import type { Category } from "@/lib/types";
@@ -8,11 +8,7 @@ export const maxDuration = 60;
 
 const MIN_FEEDBACK_FOR_SUGGESTION = 5;
 
-export async function GET(req: Request) {
-  if (!isAuthorizedCronRequest(req)) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
+export const GET = cronHandler("relevance-suggestions", async () => {
   const db = supabaseAdmin();
   const { data: categories } = await db.from("categories").select("*");
   const categoryList = (categories ?? []) as Category[];
@@ -95,4 +91,4 @@ export async function GET(req: Request) {
   }
 
   return Response.json({ suggestionsSent, errors });
-}
+});

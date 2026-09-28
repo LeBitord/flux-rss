@@ -102,6 +102,20 @@ export function EditCategoryDialog({ category }: { category: Category }) {
                 vous, pas juste l&apos;importance générique du sujet.
               </p>
             </div>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="frequent_polling"
+                defaultChecked={category.frequent_polling}
+                className="mt-0.5 size-4 accent-primary"
+              />
+              <span>
+                Vérifier aussi en journée (vers 11h et 17h)
+                <span className="block text-xs text-muted-foreground">
+                  En plus du passage du matin — pour l&apos;actu qui n&apos;attend pas le lendemain.
+                </span>
+              </span>
+            </label>
           </div>
 
           <DialogFooter>

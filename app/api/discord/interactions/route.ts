@@ -11,9 +11,12 @@ import {
   buildStockEmbed,
   buildPortfolioTotalEmbed,
   type ChartPeriod,
+  holdingFromPosition,
   type HoldingInfo,
 } from "@/lib/stock-embed";
 import type { DiscordEmbed } from "@/lib/discord-bot";
+import { mergeKeywords, parseTerms } from "@/lib/feed-filters";
+import { summarizeArticle } from "@/lib/article-summary";
 
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -21,26 +24,63 @@ const RECAP_WINDOW_DAYS = 3;
 const RECAP_LIMIT = 10;
 const HIGH_RELEVANCE_THRESHOLD = 8;
 
+const SEARCH_LIMIT = 10;
+
+type InteractionBody = {
+  application_id?: string;
+  token?: string;
+  data?: { options?: { name: string; value: unknown }[] };
+};
+
+function getOption(body: InteractionBody, name: string): unknown {
+  return body.data?.options?.find((o) => o.name === name)?.value;
+}
+
+function ephemeral(content: string) {
+  return Response.json({
+    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { content, flags: InteractionResponseFlags.EPHEMERAL },
+  });
+}
+
+// ilike treats % and _ as wildcards — escape them so a search for "5%" means "5%".
+function escapeLike(term: string): string {
+  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+// Discord requires an ack within 3s: acknowledge now, do the work after the response,
+// then patch the real content into the original (deferred) reply.
+function deferThen(
+  body: InteractionBody,
+  work: () => Promise<{ content?: string; embeds?: DiscordEmbed[] }>,
+) {
+  const { application_id: applicationId, token } = body;
+  if (applicationId && token) {
+    after(async () => {
+      let payload: { content?: string; embeds?: DiscordEmbed[] };
+      try {
+        payload = await work();
+      } catch (err) {
+        console.error("Deferred interaction failed:", err);
+        payload = { content: "Une erreur est survenue." };
+      }
+      try {
+        await fetch(`${DISCORD_API}/webhooks/${applicationId}/${token}/messages/@original`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch (err) {
+        console.error("Failed to patch deferred interaction:", err);
+      }
+    });
+  }
+  return Response.json({ type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE });
+}
+
 function hexToInt(hex: string): number {
   const parsed = parseInt(hex.replace("#", ""), 16);
   return Number.isNaN(parsed) ? 0x5865f2 : parsed;
-}
-
-function mergeKeywords(existing: string | null, additions: string[]): string {
-  const current = (existing ?? "")
-    .split(",")
-    .map((k) => k.trim())
-    .filter(Boolean);
-  const merged = new Set(current.map((k) => k.toLowerCase()));
-  const result = [...current];
-  for (const term of additions) {
-    const trimmed = term.trim();
-    if (trimmed && !merged.has(trimmed.toLowerCase())) {
-      merged.add(trimmed.toLowerCase());
-      result.push(trimmed);
-    }
-  }
-  return result.join(", ");
 }
 
 export async function POST(req: Request) {
@@ -162,13 +202,19 @@ export async function POST(req: Request) {
       .eq("id", seenItem.feed_id)
       .single();
 
+    // 👍 on a feed with no include keywords only gets logged: that feed accepts everything,
+    // and adding its first include keyword would silently narrow it to that one topic.
+    const filterUpdated =
+      feed != null && (direction === "down" || parseTerms(feed.keywords).length > 0);
+
     if (feed) {
-      const column = direction === "up" ? "keywords" : "exclude_keywords";
-      const updated = mergeKeywords(feed[column], topics);
-      await db
-        .from("feeds")
-        .update({ [column]: updated })
-        .eq("id", feed.id);
+      if (filterUpdated) {
+        const column = direction === "up" ? "keywords" : "exclude_keywords";
+        await db
+          .from("feeds")
+          .update({ [column]: mergeKeywords(feed[column], topics) })
+          .eq("id", feed.id);
+      }
 
       // Kept separately from the keyword merge above so the relevance-context suggestion
       // job can look at the raw feedback history even after keywords keep changing.
@@ -183,7 +229,9 @@ export async function POST(req: Request) {
     return Response.json({
       type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
       data: {
-        content: `${emoji} Noté — "${topics.join(", ")}" ${direction === "up" ? "renforcé" : "exclu"} pour ce flux.`,
+        content: filterUpdated
+          ? `${emoji} Noté — "${topics.join(", ")}" ${direction === "up" ? "renforcé" : "exclu"} pour ce flux.`
+          : `${emoji} Noté — "${topics.join(", ")}" pris en compte pour affiner la pertinence.`,
         flags: InteractionResponseFlags.EPHEMERAL,
       },
     });
@@ -265,95 +313,124 @@ export async function POST(req: Request) {
     });
   }
 
+  if (body.type === InteractionType.APPLICATION_COMMAND && body.data?.name === "cherche") {
+    const query = String(getOption(body, "mots") ?? "").trim();
+    if (query.length < 2) {
+      return ephemeral("Donne au moins 2 caractères à chercher.");
+    }
+    return deferThen(body, async () => {
+      const db = supabaseAdmin();
+      const [{ data: items }, { data: feeds }, { data: categories }] = await Promise.all([
+        db
+          .from("seen_items")
+          .select("title, link, score, seen_at, feed_id")
+          .ilike("title", `%${escapeLike(query)}%`)
+          .order("seen_at", { ascending: false })
+          .limit(SEARCH_LIMIT),
+        db.from("feeds").select("id, name, category_id"),
+        db.from("categories").select("id, name, color"),
+      ]);
+
+      if (!items || items.length === 0) {
+        return { content: `Aucun article trouvé pour « ${query} ».` };
+      }
+
+      const feedById = new Map((feeds ?? []).map((f) => [f.id as string, f]));
+      const categoryById = new Map((categories ?? []).map((c) => [c.id as string, c]));
+      const lines = items.map((item) => {
+        const feed = feedById.get(item.feed_id as string);
+        const category = feed ? categoryById.get(feed.category_id as string) : undefined;
+        const date = new Date(item.seen_at as string).toLocaleDateString("fr-FR", {
+          day: "numeric",
+          month: "short",
+        });
+        const fire = (item.score ?? 0) >= HIGH_RELEVANCE_THRESHOLD ? "🔥 " : "";
+        const meta = [date, category?.name, item.score ? `${item.score}/10` : null]
+          .filter(Boolean)
+          .join(" · ");
+        return `${fire}[${item.title}](${item.link}) — _${meta}_`;
+      });
+
+      return {
+        embeds: [
+          {
+            title: `🔎 « ${query} » — ${items.length} résultat(s)`.slice(0, 256),
+            color: 0x5865f2,
+            description: lines.join("\n").slice(0, 4096),
+          },
+        ],
+      };
+    });
+  }
+
+  if (body.type === InteractionType.APPLICATION_COMMAND && body.data?.name === "resume") {
+    const url = String(getOption(body, "lien") ?? "").trim();
+    if (!/^https?:\/\//i.test(url)) {
+      return ephemeral("Donne un lien complet commençant par http:// ou https://.");
+    }
+    return deferThen(body, async () => {
+      const result = await summarizeArticle(url);
+      if (!result.ok) return { content: `Impossible de résumer ce lien : ${result.error}` };
+      return {
+        embeds: [
+          {
+            title: `📝 ${result.title ?? "Résumé"}`.slice(0, 256),
+            url,
+            color: 0x5865f2,
+            description: result.summary.slice(0, 4096),
+          },
+        ],
+      };
+    });
+  }
+
   if (body.type === InteractionType.APPLICATION_COMMAND && body.data?.name === "cours") {
     const channelId: string | undefined = body.channel_id;
-    const applicationId: string | undefined = body.application_id;
-    const token: string | undefined = body.token;
-    const periodOption = (body.data?.options ?? []).find(
-      (o: { name: string; value: string }) => o.name === "periode",
-    )?.value as ChartPeriod | undefined;
-    const period: ChartPeriod = periodOption ?? "month";
+    const period = (getOption(body, "periode") as ChartPeriod | undefined) ?? "month";
 
-    // Discord requires an ack within 3s. Even the category/ticker lookup can blow that
-    // budget on a cold start, so defer FIRST and do every bit of work — DB included — in
-    // the background, then patch the real content in once it's ready.
-    if (applicationId && token) {
-      after(async () => {
-        const db = supabaseAdmin();
-        let content: string | undefined;
-        let embeds: DiscordEmbed[] | undefined;
-        try {
-          const { data: category } = await db
-            .from("categories")
-            .select("id, name")
-            .eq("discord_channel_id", channelId)
-            .maybeSingle();
+    // Even the category/ticker lookup can blow Discord's 3s budget on a cold start,
+    // so every bit of work — DB included — happens after the deferred ack.
+    return deferThen(body, async () => {
+      const db = supabaseAdmin();
+      const { data: category } = await db
+        .from("categories")
+        .select("id, name")
+        .eq("discord_channel_id", channelId)
+        .maybeSingle();
+      if (!category) return { content: "Ce salon n'est associé à aucune catégorie flux-rss." };
 
-          if (!category) {
-            content = "Ce salon n'est associé à aucune catégorie flux-rss.";
-          } else {
-            const { data: positionsInCategory } = await db
-              .from("stock_positions")
-              .select("ticker, label, shares, cost_basis, purchase_date")
-              .eq("category_id", category.id);
-            const positions = (positionsInCategory ?? []) as {
-              ticker: string;
-              label: string;
-              shares: number | null;
-              cost_basis: number | null;
-              purchase_date: string | null;
-            }[];
+      const { data: positionsInCategory } = await db
+        .from("stock_positions")
+        .select("ticker, label, shares, cost_basis, purchase_date, dividends_total")
+        .eq("category_id", category.id);
+      const positions = (positionsInCategory ?? []) as {
+        ticker: string;
+        label: string;
+        shares: number | null;
+        cost_basis: number | null;
+        purchase_date: string | null;
+        dividends_total: number | null;
+      }[];
+      if (positions.length === 0) {
+        return { content: `Aucun ticker boursier configuré pour **${category.name}**.` };
+      }
 
-            if (positions.length === 0) {
-              content = `Aucun ticker boursier configuré pour **${category.name}**.`;
-            } else {
-              const holdingByTicker = new Map<string, HoldingInfo>(
-                positions.map((p) => [
-                  p.ticker,
-                  { shares: p.shares, costBasis: p.cost_basis, purchaseDate: p.purchase_date },
-                ]),
-              );
-              const results = await getStockQuotesWithHistory(positions);
-              if (results.length === 0) {
-                content = "Impossible de récupérer les cours pour le moment.";
-              } else {
-                embeds = await Promise.all(
-                  results.map(({ quote, history }) =>
-                    buildStockEmbed(quote, history, period, holdingByTicker.get(quote.ticker) ?? null),
-                  ),
-                );
-                const totalEmbed = buildPortfolioTotalEmbed(
-                  results.map(({ quote }) => ({
-                    quote,
-                    holding: holdingByTicker.get(quote.ticker) ?? null,
-                  })),
-                );
-                if (totalEmbed) embeds.push(totalEmbed);
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Failed to resolve /cours follow-up:", err);
-          content = "Une erreur est survenue.";
-        }
+      const holdingByTicker = new Map<string, HoldingInfo>(
+        positions.map((p) => [p.ticker, holdingFromPosition(p)]),
+      );
+      const results = await getStockQuotesWithHistory(positions);
+      if (results.length === 0) return { content: "Impossible de récupérer les cours pour le moment." };
 
-        try {
-          await fetch(
-            `${DISCORD_API}/webhooks/${applicationId}/${token}/messages/@original`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ content, embeds }),
-            },
-          );
-        } catch (err) {
-          console.error("Failed to patch /cours follow-up:", err);
-        }
-      });
-    }
-
-    return Response.json({
-      type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+      const embeds = await Promise.all(
+        results.map(({ quote, history }) =>
+          buildStockEmbed(quote, history, period, holdingByTicker.get(quote.ticker) ?? null),
+        ),
+      );
+      const totalEmbed = buildPortfolioTotalEmbed(
+        results.map(({ quote }) => ({ quote, holding: holdingByTicker.get(quote.ticker) ?? null })),
+      );
+      if (totalEmbed) embeds.push(totalEmbed);
+      return { embeds };
     });
   }
 

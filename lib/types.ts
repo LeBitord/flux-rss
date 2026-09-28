@@ -7,6 +7,7 @@ export type Category = {
   relevance_context: string | null;
   last_relevance_suggestion_at: string | null;
   pending_relevance_suggestion: string | null;
+  frequent_polling: boolean;
   created_at: string;
 };
 
@@ -41,6 +42,27 @@ export type StockPosition = {
   shares: number | null;
   cost_basis: number | null;
   purchase_date: string | null;
+  target_above: number | null;
+  target_below: number | null;
+  dividends_total: number;
   category_id: string;
+  created_at: string;
+};
+
+export type PositionDividendRow = {
+  id: string;
+  position_id: string;
+  payment_date: string;
+  amount: number;
+  created_at: string;
+};
+
+export type SportsTeam = {
+  id: string;
+  category_id: string;
+  thesportsdb_id: string;
+  name: string;
+  emoji: string;
+  last_notified_event_id: string | null;
   created_at: string;
 };

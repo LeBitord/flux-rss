@@ -5,20 +5,58 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
+import { evaluateCronHealth, type CronRunRow } from "@/lib/cron-runs";
+
+// Data also changes outside the admin (Discord feedback, cron jobs), so never serve a
+// copy prerendered at build time.
+export const dynamic = "force-dynamic";
 
 const LOOKBACK_DAYS = 30;
+const PAGE_SIZE = 1000; // PostgREST caps each response at 1000 rows
+
+async function fetchRecentItems(since: string) {
+  const rows: { feed_id: string; score: number | null }[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data } = await supabaseAdmin()
+      .from("seen_items")
+      .select("feed_id, score")
+      .gte("seen_at", since)
+      .order("id")
+      .range(from, from + PAGE_SIZE - 1);
+    rows.push(...((data ?? []) as typeof rows));
+    if (!data || data.length < PAGE_SIZE) return rows;
+  }
+}
+
+function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("fr-FR", {
+    timeZone: "Europe/Paris",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default async function StatsPage() {
   const db = supabaseAdmin();
   const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  const [{ data: categories }, { data: feeds }, { data: items }, { data: feedback }] =
-    await Promise.all([
-      db.from("categories").select("*").order("name"),
-      db.from("feeds").select("*"),
-      db.from("seen_items").select("feed_id, score").gte("seen_at", since),
-      db.from("feedback_log").select("category_id, direction").gte("created_at", since),
-    ]);
+  const [
+    { data: categories },
+    { data: feeds },
+    items,
+    { data: feedback },
+    { data: cronRuns },
+  ] = await Promise.all([
+    db.from("categories").select("*").order("name"),
+    db.from("feeds").select("*"),
+    fetchRecentItems(since),
+    db.from("feedback_log").select("category_id, direction").gte("created_at", since),
+    db.from("cron_runs").select("*"),
+  ]);
+  const cronStatuses = evaluateCronHealth((cronRuns ?? []) as CronRunRow[]);
 
   const categoryList = (categories ?? []) as Category[];
   const feedList = (feeds ?? []) as Feed[];
@@ -28,7 +66,7 @@ export default async function StatsPage() {
   const scoreAggByCategory = new Map<string, { sum: number; count: number }>();
   const countByFeed = new Map<string, number>();
 
-  for (const item of items ?? []) {
+  for (const item of items) {
     const feedId = item.feed_id as string;
     const feed = feedById.get(feedId);
     countByFeed.set(feedId, (countByFeed.get(feedId) ?? 0) + 1);
@@ -124,6 +162,42 @@ export default async function StatsPage() {
           })}
         </div>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Tâches planifiées</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Tâche</TableHead>
+                <TableHead>Dernier succès</TableHead>
+                <TableHead>État</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {cronStatuses.map((status) => (
+                <TableRow key={status.job}>
+                  <TableCell className="font-medium">{status.label}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDateTime(status.row?.last_success_at)}
+                  </TableCell>
+                  <TableCell
+                    className={
+                      status.problem
+                        ? "text-destructive text-xs whitespace-normal"
+                        : "text-muted-foreground text-xs"
+                    }
+                  >
+                    {!status.row ? "pas encore de passage" : (status.problem ?? "OK")}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

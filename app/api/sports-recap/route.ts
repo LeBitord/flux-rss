@@ -1,46 +1,36 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { cronHandler } from "@/lib/cron-runs";
 import { sendBotMessage } from "@/lib/discord-bot";
 import { getTeamRecap, formatMatchResult, formatNextMatch } from "@/lib/sports";
-import type { Category } from "@/lib/types";
+import type { Category, SportsTeam } from "@/lib/types";
 
 export const maxDuration = 30;
 
-// TheSportsDB team ids (verified against https://www.thesportsdb.com/api/v1/json/3/searchteams.php).
-// Hardcoded rather than admin-configurable — these two teams are the whole point of this route.
-const TEAMS = [
-  { teamId: "135332", teamName: "ASM Clermont Auvergne", categoryName: "rugby", emoji: "🏉" },
-  { teamId: "137293", teamName: "Chorale Roanne Basket", categoryName: "basket", emoji: "🏀" },
-];
-
-export async function GET(req: Request) {
-  if (!isAuthorizedCronRequest(req)) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
+export const GET = cronHandler("sports-recap", async () => {
   const db = supabaseAdmin();
-  const { data: categories } = await db.from("categories").select("*");
-  const categoryByName = new Map(
-    ((categories ?? []) as Category[]).map((c) => [c.name.toLowerCase(), c]),
-  );
+  const [{ data: categories }, { data: teams }] = await Promise.all([
+    db.from("categories").select("*"),
+    db.from("sports_teams").select("*"),
+  ]);
+  const categoryById = new Map(((categories ?? []) as Category[]).map((c) => [c.id, c]));
 
   let sent = 0;
   const errors: string[] = [];
 
-  for (const team of TEAMS) {
-    const category = categoryByName.get(team.categoryName.toLowerCase());
+  for (const team of (teams ?? []) as SportsTeam[]) {
+    const category = categoryById.get(team.category_id);
     if (!category?.discord_channel_id) continue;
 
-    const { lastMatch, nextMatch } = await getTeamRecap(team.teamId);
+    const { lastMatch, nextMatch } = await getTeamRecap(team.thesportsdb_id);
     const lines: string[] = [];
     if (lastMatch) {
-      const resultLine = formatMatchResult(lastMatch, team.teamName);
+      const resultLine = formatMatchResult(lastMatch, team.name);
       if (resultLine) lines.push(resultLine);
     }
-    if (nextMatch) lines.push(formatNextMatch(nextMatch, team.teamName));
+    if (nextMatch) lines.push(formatNextMatch(nextMatch, team.name));
     if (lines.length === 0) continue;
 
-    const content = `${team.emoji} **${team.teamName}**\n${lines.join("\n")}`;
+    const content = `${team.emoji} **${team.name}**\n${lines.join("\n")}`;
     const result = await sendBotMessage(category.discord_channel_id, { content });
     if (result.ok) {
       sent += 1;
@@ -50,4 +40,4 @@ export async function GET(req: Request) {
   }
 
   return Response.json({ sent, errors });
-}
+});

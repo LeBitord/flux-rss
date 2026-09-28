@@ -1,0 +1,16 @@
+name: Sports results
+
+on:
+  schedule:
+    # Daily 22:00 UTC — after evening matches (Top 14 / Pro B kick-offs end by ~21:30 UTC).
+    - cron: "0 22 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  results:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call sports-results endpoint
+        run: |
+          curl -sf -X GET "https://flux-rss-fawn.vercel.app/api/sports-results" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

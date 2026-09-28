@@ -8,33 +8,41 @@ Autour de ce noyau : notation de pertinence par IA avec boucle de feedback depui
 
 ### Veille RSS
 - **Polling quotidien** (`/api/poll`) : parsing des flux, déduplication par `guid`, filtre d'ancienneté (7 jours), mots-clés à inclure / à exclure par flux, puis regroupement des doublons inter-flux (titres similaires dans une même catégorie).
+- **Passages en journée** (`/api/poll-frequent`, vers 11h et 17h) pour les catégories qui l'activent dans l'admin : mêmes digests, sans cours ni briefing.
+- **Purge** : les articles datés de plus de 90 jours sont supprimés de `seen_items` à chaque passage (les articles sans date sont conservés, sinon ils seraient re-notifiés).
 - **Digest Discord par catégorie** : un message par salon, jusqu'à 10 embeds triés par pertinence, avec favicon de la source, résumé et image quand le flux en fournit.
 - **Santé des flux** : alerte si un flux échoue 3 fois de suite ou ne publie plus rien depuis 14 jours (au plus une fois par semaine) ; désactivation automatique après 10 échecs ou 30 jours de silence.
 - **Alerte d'échec** vers un salon dédié (webhook) quand un flux, un envoi Discord ou une étape du passage plante.
 
 ### Pertinence IA (Gemini)
 - Chaque nouvel article est noté de 1 à 10 selon le **contexte de pertinence** propre à sa catégorie, et reçoit 1 à 3 mots-clés. Les articles ≥ 8 sont marqués 🔥.
-- **Boutons 👍/👎** sous les articles 🔥 : un clic ajoute les mots-clés de l'article aux `keywords` (👍) ou `exclude_keywords` (👎) du flux, et journalise le retour.
+- **Boutons 👍/👎** sous chaque article du digest : 👎 ajoute les mots-clés de l'article aux `exclude_keywords` du flux ; 👍 les ajoute aux `keywords` seulement si le flux a déjà un filtre d'inclusion (sinon il restreindrait un flux qui accepte tout). Chaque retour est journalisé.
 - **Suggestions de contexte** (hebdo) : dès qu'une catégorie a accumulé 5+ retours, l'IA propose une version affinée de son contexte de pertinence, avec boutons Appliquer / Ignorer sur Discord. Jamais appliqué automatiquement.
 - **Briefing matinal** : un paragraphe factuel par catégorie (en français, même pour les sources anglophones), plus les cours du jour.
 - **Top de la semaine** : les 15 articles les mieux notés, tous sujets confondus.
 
 ### Bourse
-- Positions (ticker + libellé) rattachées à une catégorie, avec **historique de transactions** (achats/ventes) pour calculer parts détenues, PRU et performance depuis l'achat.
+- Positions (ticker + libellé) rattachées à une catégorie, avec **historique de transactions** (achats/ventes/dividendes) pour calculer parts détenues, PRU et performance depuis l'achat, dividendes compris.
 - Graphique par position (QuickChart) dans le digest quotidien + un embed de total du portefeuille.
 - **Alertes de seuil** en séance : message dès qu'une position varie de ±3 % dans la journée (une seule alerte par sens et par jour).
-- Résumé hebdo de la variation sur 7 jours.
+- **Prix cibles** par position (seuil haut / bas) : alerte unique, le seuil s'efface une fois franchi.
+- Résumé hebdo de la variation sur 7 jours, avec la variation de l'ensemble des positions comparée à un indice (MSCI World via l'ETF `CW8.PA` par défaut).
 
 ### Sport
-- Récap hebdo (dernier résultat + prochain match) de l'ASM Clermont Auvergne (salon `rugby`) et de la Chorale Roanne (salon `basket`), via TheSportsDB.
+- Équipes suivies configurables par catégorie dans l'admin (recherche par nom sur TheSportsDB).
+- Score posté le soir du match (`/api/sports-results`) et récap hebdo le lundi (dernier résultat + prochain match).
 
 ### Bot Discord
 - `/recap` : les 10 articles les mieux notés des 3 derniers jours pour la catégorie du salon.
 - `/cours [periode]` : cours et graphiques (jour / semaine / mois) des positions de la catégorie du salon.
+- `/cherche <mots>` : retrouve un article déjà reçu (titre), toutes catégories.
+- `/resume <lien>` : résumé en français d'un article à partir de son URL.
 
 ### Administration (`/admin`)
-- Gestion des catégories (salon Discord, couleur, contexte de pertinence), des flux (URL, mots-clés, activation) et des positions boursières / transactions.
-- Page `/admin/stats` : volume d'articles, score moyen et retours 👍/👎 par catégorie sur 30 jours, flux les plus actifs.
+- Gestion des catégories (salon Discord, couleur, contexte de pertinence, passages en journée), des flux (URL, mots-clés, activation), des positions boursières / transactions / prix cibles et des équipes suivies.
+- **Ajout de flux assisté** : coller l'adresse d'un site, « Analyser » trouve son flux RSS et note ses derniers articles selon le contexte de la catégorie.
+- **Import / export OPML** de tous les flux.
+- Page `/admin/stats` : volume d'articles, score moyen et retours 👍/👎 par catégorie sur 30 jours, flux les plus actifs, état des tâches planifiées.
 - **Sécurité** : mot de passe haché (scrypt), invalidation de session au changement de mot de passe, verrouillage anti-bruteforce sur la connexion, garde-fou SSRF sur les URLs saisies et pollées, headers de sécurité (CSP, HSTS, anti-clickjacking).
 
 ## Stack
@@ -55,12 +63,15 @@ Toutes les routes sont protégées par `Authorization: Bearer $CRON_SECRET` (`li
 |---|---|---|---|
 | `/api/poll` | tous les jours 05:00 | Vercel Cron | Digests RSS, cours du jour, briefing, santé des flux |
 | `/api/weekly-recap` | lundi 07:00 | Vercel Cron | Résumé hebdo des positions |
-| `/api/sports-recap` | lundi 08:00 | GitHub Actions | Récap ASM / Chorale Roanne |
+| `/api/poll-frequent` | tous les jours 09:00 et 15:00 | GitHub Actions | Digests des catégories en « passages en journée » |
+| `/api/sports-recap` | lundi 08:00 | GitHub Actions | Récap hebdo des équipes suivies |
+| `/api/sports-results` | tous les jours 22:00 | GitHub Actions | Score des matchs du jour |
 | `/api/relevance-suggestions` | lundi 09:00 | GitHub Actions | Suggestions de contexte de pertinence |
 | `/api/stock-alert` | toutes les heures 07:00–16:00, lun–ven | GitHub Actions | Alertes de seuil boursier |
 | `/api/weekly-top` | dimanche 18:00 | GitHub Actions | Top de la semaine |
+| `/api/cron-health` | tous les jours 08:00 | GitHub Actions | Alerte (webhook) si une tâche ci-dessus a échoué ou n'a pas tourné dans les délais |
 
-Chaque workflow GitHub peut aussi être lancé à la main (`workflow_dispatch`).
+Chaque workflow GitHub peut aussi être lancé à la main (`workflow_dispatch`). Chaque passage est enregistré dans la table `cron_runs` (visible sur `/admin/stats`).
 
 ## Discord
 
@@ -69,13 +80,16 @@ Deux mécanismes coexistent :
 - **Bot** (`DISCORD_BOT_TOKEN`) : tous les messages de catégorie, briefing, bourse et sport sont postés par le bot dans le salon `discord_channel_id` de la catégorie — nécessaire pour les boutons interactifs. Le bot doit avoir accès en écriture à chaque salon.
 - **Webhook** (`ALERTS_DISCORD_WEBHOOK_URL`) : uniquement pour les alertes techniques (échecs, santé des flux).
 
-Les interactions (boutons, commandes slash) arrivent sur `POST /api/discord/interactions`, à renseigner comme *Interactions Endpoint URL* dans le portail développeur Discord ; la signature est vérifiée avec `DISCORD_PUBLIC_KEY`. Les commandes `/recap` et `/cours` sont enregistrées une fois pour toutes via l'API Discord (pas de script dans le dépôt).
+Les interactions (boutons, commandes slash) arrivent sur `POST /api/discord/interactions`, à renseigner comme *Interactions Endpoint URL* dans le portail développeur Discord ; la signature est vérifiée avec `DISCORD_PUBLIC_KEY`.
+
+Les commandes slash sont enregistrées sur chaque serveur où se trouve le bot par `npm run register-commands` (affiche ce qui manque sans rien changer) puis `npm run register-commands -- --apply`. Les commandes existantes ne sont pas touchées, sauf avec `--force`.
 
 ## Développement local
 
 ```bash
 npm install
 npm run dev
+npm test          # tests unitaires (Vitest), aussi lancés par la CI GitHub à chaque push
 ```
 
 Nécessite un fichier `.env.local` (non versionné, récupérable via `vercel env pull`) avec :
@@ -94,6 +108,7 @@ Nécessite un fichier `.env.local` (non versionné, récupérable via `vercel en
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Clé Gemini — sans elle, pas de notation (score neutre), ni briefing, ni suggestions |
 | `ALPHA_VANTAGE_API_KEY` | Cours de bourse (offre gratuite : ~100 jours d'historique, 1 requête/s) |
 | `STOCK_ALERT_THRESHOLD_PERCENT` | Seuil des alertes boursières en % (optionnel, défaut `3`) |
+| `BENCHMARK_TICKER`, `BENCHMARK_LABEL` | Indice de comparaison du résumé hebdo (optionnel, défaut `CW8.PA` / MSCI World ; `BENCHMARK_TICKER` vide pour désactiver) |
 
 ## Base de données
 
@@ -113,4 +128,4 @@ npm run migrate -- --baseline 0018_position_transactions.sql
 
 Toutes les tables ont RLS activé avec accès réservé au rôle `service_role` : l'appli n'utilise que la clé service côté serveur.
 
-Tables principales : `categories`, `feeds`, `seen_items` (articles vus, avec score et mots-clés), `feedback_log`, `stock_positions`, `position_transactions`, `stock_price_history`, `stock_alerts_sent`, `admin_settings`, `login_attempts`.
+Tables principales : `categories`, `feeds`, `seen_items` (articles vus, avec score et mots-clés), `feedback_log`, `stock_positions`, `position_transactions`, `position_dividends`, `stock_price_history`, `stock_alerts_sent`, `sports_teams`, `cron_runs`, `admin_settings`, `login_attempts`.

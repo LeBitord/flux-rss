@@ -1,6 +1,8 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { cronHandler } from "@/lib/cron-runs";
 import { sendBotMessage } from "@/lib/discord-bot";
+import { getStockQuoteWithHistory } from "@/lib/stocks";
+import { changeSince, formatPercent, getBenchmarkConfig, portfolioChange } from "@/lib/benchmark";
 import type { Category, StockPosition } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -18,11 +20,7 @@ function formatWeeklyLine(label: string, ticker: string, latest: number, weekAgo
   );
 }
 
-export async function GET(req: Request) {
-  if (!isAuthorizedCronRequest(req)) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
+export const GET = cronHandler("weekly-recap", async () => {
   const db = supabaseAdmin();
   const [{ data: categories }, { data: positions }] = await Promise.all([
     db.from("categories").select("*"),
@@ -46,11 +44,20 @@ export async function GET(req: Request) {
   let sent = 0;
   const errors: string[] = [];
 
+  // Fetched live rather than from stock_price_history, which only holds tracked positions.
+  const benchmark = getBenchmarkConfig();
+  let benchmarkChange: number | null = null;
+  if (benchmark && positionList.length > 0) {
+    const result = await getStockQuoteWithHistory(benchmark.ticker, benchmark.label);
+    benchmarkChange = result ? changeSince(result.history, cutoff) : null;
+  }
+
   for (const [categoryId, categoryPositions] of positionsByCategory) {
     const category = categoryById.get(categoryId);
     if (!category?.discord_channel_id) continue;
 
     const lines: string[] = [];
+    const weekly: { shares: number | null; latest: number; weekAgo: number }[] = [];
     for (const position of categoryPositions) {
       const [{ data: latestRow }, { data: weekAgoRow }] = await Promise.all([
         db
@@ -75,12 +82,29 @@ export async function GET(req: Request) {
         continue;
       }
 
+      weekly.push({
+        shares: position.shares,
+        latest: Number(latestRow.price),
+        weekAgo: Number(weekAgoRow.price),
+      });
       lines.push(
         formatWeeklyLine(position.label, position.ticker, latestRow.price, weekAgoRow.price),
       );
     }
 
     if (lines.length === 0) continue;
+
+    const portfolio = portfolioChange(weekly);
+    if (portfolio !== null && weekly.length > 1) {
+      lines.push(`\n📐 **Ensemble des positions** : ${formatPercent(portfolio)} sur 7 jours`);
+    }
+    if (portfolio !== null && benchmarkChange !== null && benchmark) {
+      const diff = portfolio - benchmarkChange;
+      lines.push(
+        `🌍 **${benchmark.label}** : ${formatPercent(benchmarkChange)} — ` +
+          `${diff >= 0 ? "devant" : "derrière"} l'indice de ${Math.abs(diff).toFixed(2)} pt`,
+      );
+    }
 
     const content = `📊 **${category.name}** — résumé hebdo\n${lines.join("\n")}`;
     const result = await sendBotMessage(category.discord_channel_id, { content });
@@ -92,4 +116,4 @@ export async function GET(req: Request) {
   }
 
   return Response.json({ sent, errors });
-}
+});

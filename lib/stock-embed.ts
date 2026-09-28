@@ -138,7 +138,26 @@ export type HoldingInfo = {
   shares: number | null;
   costBasis: number | null;
   purchaseDate: string | null;
+  dividendsTotal: number;
 };
+
+export function holdingFromPosition(p: {
+  shares: number | null;
+  cost_basis: number | null;
+  purchase_date: string | null;
+  dividends_total?: number | null;
+}): HoldingInfo {
+  return {
+    shares: p.shares,
+    costBasis: p.cost_basis,
+    purchaseDate: p.purchase_date,
+    dividendsTotal: Number(p.dividends_total ?? 0),
+  };
+}
+
+function dividendsSuffix(dividends: number): string {
+  return dividends > 0 ? ` dont dividendes ${dividends.toFixed(2)} €` : "";
+}
 
 export async function buildStockEmbed(
   quote: StockQuote,
@@ -161,13 +180,14 @@ export async function buildStockEmbed(
 
   let sincePurchaseLine = "";
   if (shares && shares > 0 && costBasis && costBasis > 0) {
-    const gain = shares * (quote.price - costBasis);
-    const gainPercent = ((quote.price - costBasis) / costBasis) * 100;
+    const dividends = holding?.dividendsTotal ?? 0;
+    const gain = shares * (quote.price - costBasis) + dividends;
+    const gainPercent = (gain / (shares * costBasis)) * 100;
     const gainSign = gain >= 0 ? "+" : "";
     const dateLabel = holding?.purchaseDate
       ? ` depuis le ${new Date(holding.purchaseDate).toLocaleDateString("fr-FR")}`
       : "";
-    sincePurchaseLine = `\nPerformance${dateLabel} : **${gainSign}${gain.toFixed(2)} €** (${gainSign}${gainPercent.toFixed(2)}%)`;
+    sincePurchaseLine = `\nPerformance${dateLabel} : **${gainSign}${gain.toFixed(2)} €** (${gainSign}${gainPercent.toFixed(2)}%)${dividendsSuffix(dividends)}`;
   }
 
   const embed: DiscordEmbed = {
@@ -205,10 +225,11 @@ export function buildPortfolioTotalEmbed(
       0,
     );
     const currentValue = withCostBasis.reduce((sum, q) => sum + q.holding!.shares! * q.quote.price, 0);
-    const gain = currentValue - invested;
+    const dividends = withCostBasis.reduce((sum, q) => sum + q.holding!.dividendsTotal, 0);
+    const gain = currentValue - invested + dividends;
     const gainPercent = invested > 0 ? (gain / invested) * 100 : 0;
     const gainSign = gain >= 0 ? "+" : "";
-    sincePurchaseLine = `\nPerformance globale : **${gainSign}${gain.toFixed(2)} €** (${gainSign}${gainPercent.toFixed(2)}%)`;
+    sincePurchaseLine = `\nPerformance globale : **${gainSign}${gain.toFixed(2)} €** (${gainSign}${gainPercent.toFixed(2)}%)${dividendsSuffix(dividends)}`;
   }
 
   return {

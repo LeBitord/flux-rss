@@ -15,21 +15,30 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Receipt, Trash2 } from "lucide-react";
-import type { StockPosition, PositionTransactionRow } from "@/lib/types";
-import { addTransaction, deleteTransaction } from "./actions";
+import type { StockPosition, PositionTransactionRow, PositionDividendRow } from "@/lib/types";
+import { addTransaction, deleteDividend, deleteTransaction } from "./actions";
+
+type HistoryEntry =
+  | { kind: "tx"; date: string; row: PositionTransactionRow }
+  | { kind: "dividend"; date: string; row: PositionDividendRow };
 
 export function TransactionDialog({
   position,
   transactions,
+  dividends,
 }: {
   position: StockPosition;
   transactions: PositionTransactionRow[];
+  dividends: PositionDividendRow[];
 }) {
   const [open, setOpen] = useState(false);
+  const [type, setType] = useState("buy");
   const today = new Date().toISOString().slice(0, 10);
-  const sorted = [...transactions].sort((a, b) =>
-    b.transaction_date.localeCompare(a.transaction_date),
-  );
+  const isDividend = type === "dividend";
+  const sorted: HistoryEntry[] = [
+    ...transactions.map((row) => ({ kind: "tx" as const, date: row.transaction_date, row })),
+    ...dividends.map((row) => ({ kind: "dividend" as const, date: row.payment_date, row })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -49,6 +58,7 @@ export function TransactionDialog({
           <DialogTitle>Transactions — {position.label}</DialogTitle>
           <DialogDescription>
             Parts et PRU moyen se recalculent automatiquement à partir de l&apos;historique.
+            Pour un dividende : parts détenues × dividende par part.
           </DialogDescription>
         </DialogHeader>
 
@@ -60,11 +70,13 @@ export function TransactionDialog({
               <select
                 id={`tx-type-${position.id}`}
                 name="type"
-                defaultValue="buy"
+                value={type}
+                onChange={(e) => setType(e.target.value)}
                 className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
               >
                 <option value="buy">Achat</option>
                 <option value="sell">Vente</option>
+                <option value="dividend">Dividende</option>
               </select>
             </div>
             <div className="space-y-2">
@@ -90,14 +102,16 @@ export function TransactionDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`tx-price-${position.id}`}>Prix / part</Label>
+              <Label htmlFor={`tx-price-${position.id}`}>
+                {isDividend ? "Dividende / part" : "Prix / part"}
+              </Label>
               <Input
                 id={`tx-price-${position.id}`}
                 name="price_per_share"
                 type="number"
                 min="0"
                 step="any"
-                placeholder="150.00"
+                placeholder={isDividend ? "2.50" : "150.00"}
                 required
               />
             </div>
@@ -111,14 +125,16 @@ export function TransactionDialog({
           <>
             <Separator />
             <div className="space-y-1.5 max-h-48 overflow-y-auto py-1">
-              {sorted.map((tx) => (
-                <div key={tx.id} className="flex items-center justify-between text-xs">
+              {sorted.map((entry) => (
+                <div key={entry.row.id} className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">
-                    {tx.shares > 0 ? "Achat" : "Vente"} {Math.abs(tx.shares)} @{" "}
-                    {tx.price_per_share.toFixed(2)} € — {tx.transaction_date}
+                    {entry.kind === "dividend"
+                      ? `Dividende ${entry.row.amount.toFixed(2)} €`
+                      : `${entry.row.shares > 0 ? "Achat" : "Vente"} ${Math.abs(entry.row.shares)} @ ${entry.row.price_per_share.toFixed(2)} €`}{" "}
+                    — {entry.date}
                   </span>
-                  <form action={deleteTransaction}>
-                    <input type="hidden" name="id" value={tx.id} />
+                  <form action={entry.kind === "dividend" ? deleteDividend : deleteTransaction}>
+                    <input type="hidden" name="id" value={entry.row.id} />
                     <input type="hidden" name="position_id" value={position.id} />
                     <Button
                       type="submit"

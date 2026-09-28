@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { cronHandler } from "@/lib/cron-runs";
 import { getStockQuotes } from "@/lib/stocks";
 import { sendBotMessage } from "@/lib/discord-bot";
 import type { Category, StockPosition } from "@/lib/types";
@@ -8,11 +8,7 @@ export const maxDuration = 60;
 
 const DEFAULT_THRESHOLD_PERCENT = 3;
 
-export async function GET(req: Request) {
-  if (!isAuthorizedCronRequest(req)) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
+export const GET = cronHandler("stock-alert", async () => {
   const threshold = parseFloat(
     process.env.STOCK_ALERT_THRESHOLD_PERCENT ?? String(DEFAULT_THRESHOLD_PERCENT),
   );
@@ -74,5 +70,35 @@ export async function GET(req: Request) {
     if (result.ok) alertsSent += 1;
   }
 
-  return Response.json({ checked: quotes.length, alertsSent });
-}
+  // One-shot target alerts: the target is cleared once it fires, so it never repeats —
+  // set a new one in the admin to be alerted again.
+  let targetAlertsSent = 0;
+  for (const quote of quotes) {
+    const position = positionByTicker.get(quote.ticker);
+    const category = categoryByTicker.get(quote.ticker);
+    if (!position || !category?.discord_channel_id) continue;
+
+    const hits: { column: "target_above" | "target_below"; line: string }[] = [];
+    if (position.target_above != null && quote.price >= position.target_above) {
+      hits.push({
+        column: "target_above",
+        line: `🎯 **${position.label} (${quote.ticker})** a atteint ${quote.price.toFixed(2)} € — seuil haut de ${Number(position.target_above).toFixed(2)} € franchi.`,
+      });
+    }
+    if (position.target_below != null && quote.price <= position.target_below) {
+      hits.push({
+        column: "target_below",
+        line: `🎯 **${position.label} (${quote.ticker})** est descendu à ${quote.price.toFixed(2)} € — seuil bas de ${Number(position.target_below).toFixed(2)} € franchi.`,
+      });
+    }
+
+    for (const hit of hits) {
+      const result = await sendBotMessage(category.discord_channel_id, { content: hit.line });
+      if (!result.ok) continue; // keep the target so the next run retries
+      await db.from("stock_positions").update({ [hit.column]: null }).eq("id", position.id);
+      targetAlertsSent += 1;
+    }
+  }
+
+  return Response.json({ checked: quotes.length, alertsSent, targetAlertsSent });
+});

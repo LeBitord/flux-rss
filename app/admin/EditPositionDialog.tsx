@@ -67,6 +67,31 @@ export function EditPositionDialog({ position }: { position: StockPosition }) {
                 required
               />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor={`edit-position-above-${position.id}`}>Alerte si ≥ (€)</Label>
+                <Input
+                  id={`edit-position-above-${position.id}`}
+                  name="target_above"
+                  inputMode="decimal"
+                  defaultValue={position.target_above ?? ""}
+                  placeholder="—"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`edit-position-below-${position.id}`}>Alerte si ≤ (€)</Label>
+                <Input
+                  id={`edit-position-below-${position.id}`}
+                  name="target_below"
+                  inputMode="decimal"
+                  defaultValue={position.target_below ?? ""}
+                  placeholder="—"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Alerte unique : le seuil s&apos;efface une fois franchi.
+            </p>
             {position.shares != null && (
               <p className="text-xs text-muted-foreground">
                 Position actuelle : {position.shares} part{position.shares > 1 ? "s" : ""}
