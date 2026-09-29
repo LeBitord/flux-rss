@@ -21,7 +21,10 @@ export const GET = cronHandler("sports-recap", async () => {
     const category = categoryById.get(team.category_id);
     if (!category?.discord_channel_id) continue;
 
-    const { lastMatch, nextMatch } = await getTeamRecap(team.thesportsdb_id);
+    const { lastMatch, nextMatch, pendingEventId } = await getTeamRecap(team);
+    if (pendingEventId !== team.pending_event_id) {
+      await db.from("sports_teams").update({ pending_event_id: pendingEventId }).eq("id", team.id);
+    }
     const lines: string[] = [];
     if (lastMatch) {
       const resultLine = formatMatchResult(lastMatch, team.name);

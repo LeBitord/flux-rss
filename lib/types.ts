@@ -65,5 +65,6 @@ export type SportsTeam = {
   name: string;
   emoji: string;
   last_notified_event_id: string | null;
+  pending_event_id: string | null;
   created_at: string;
 };

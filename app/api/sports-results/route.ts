@@ -30,12 +30,24 @@ export const GET = cronHandler("sports-results", async () => {
     const category = categoryById.get(team.category_id);
     if (!category?.discord_channel_id) continue;
 
-    const { lastMatch, nextMatch } = await getTeamRecap(team.thesportsdb_id);
-    if (!lastMatch || lastMatch.id === team.last_notified_event_id) continue;
-    if (lastMatch.date < oldestDate) continue;
+    const { lastMatch, nextMatch, pendingEventId } = await getTeamRecap(team);
+    // Skipped when the post below fails, so the remembered match (and its score) is kept
+    // for the next run instead of being replaced by the upcoming one.
+    const savePending = async () => {
+      if (pendingEventId !== team.pending_event_id) {
+        await db.from("sports_teams").update({ pending_event_id: pendingEventId }).eq("id", team.id);
+      }
+    };
 
-    const resultLine = formatMatchResult(lastMatch, team.name);
-    if (!resultLine) continue; // no score yet — the next run will pick it up
+    const resultLine =
+      lastMatch &&
+      lastMatch.id !== team.last_notified_event_id &&
+      lastMatch.date >= oldestDate &&
+      formatMatchResult(lastMatch, team.name);
+    if (!lastMatch || !resultLine) {
+      await savePending();
+      continue;
+    }
 
     const lines = [resultLine.replace(/^Dernier match — /, "")];
     if (nextMatch) lines.push(formatNextMatch(nextMatch, team.name));
@@ -50,6 +62,7 @@ export const GET = cronHandler("sports-results", async () => {
       .from("sports_teams")
       .update({ last_notified_event_id: lastMatch.id })
       .eq("id", team.id);
+    await savePending();
     sent += 1;
   }
 
