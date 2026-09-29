@@ -44,14 +44,7 @@ function faviconUrl(feedUrl: string): string {
   return `https://www.google.com/s2/favicons?domain=${hostname}&sz=64`;
 }
 
-async function sendCategoryDigest(
-  category: Category,
-  items: NewItem[],
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!category.discord_channel_id) {
-    return { ok: false, error: "Aucun salon Discord (discord_channel_id) configuré" };
-  }
-
+export function buildCategoryDigest(category: Category, items: NewItem[]) {
   const color = hexToInt(category.color);
   const { featured, compact, belowThreshold } = layoutDigest(items, category.min_score);
 
@@ -87,7 +80,63 @@ async function sendCategoryDigest(
       ? `**${category.name}** — ${items.length} nouvel(le)(s) article(s)${minorNote}`
       : `**${category.name}** — rien de marquant, ${items.length} article(s) mineur(s)`;
 
-  return sendBotMessage(category.discord_channel_id, { content, embeds, components });
+  return { content, embeds, components };
+}
+
+export async function sendCategoryDigest(
+  category: Category,
+  items: NewItem[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!category.discord_channel_id) {
+    return { ok: false, error: "Aucun salon Discord (discord_channel_id) configuré" };
+  }
+  const channelId = category.discord_channel_id;
+  const full = buildCategoryDigest(category, items);
+
+  // Discord once rejected a normal-sized basket digest with 413 "Request entity too large"
+  // (2026-09-30, not reproducible). Rather than lose the digest, retry lighter versions;
+  // the final error reports the sizes so a real limit can be identified next time.
+  const attempts = [
+    full,
+    {
+      ...full,
+      embeds: full.embeds
+        .filter((e) => !e.title.startsWith("➕"))
+        .map((e) => ({ ...e, thumbnail: undefined, author: e.author && { name: e.author.name } })),
+    },
+    { content: plainTextDigest(category, items), components: full.components.slice(-1) },
+  ];
+
+  let lastError = "";
+  for (const payload of attempts) {
+    const result = await sendBotMessage(channelId, payload);
+    if (result.ok) return result;
+    lastError = result.error;
+    if (!/\b413\b|40005/.test(result.error)) break; // not a size problem: don't retry
+  }
+  return { ok: false, error: `${lastError} ${describeSize(full)}` };
+}
+
+function describeSize(payload: { embeds: DiscordEmbed[] }): string {
+  const text = payload.embeds.reduce(
+    (n, e) => n + e.title.length + (e.description?.length ?? 0) + (e.author?.name.length ?? 0),
+    0,
+  );
+  return `(message complet : ${JSON.stringify(payload).length} octets, ${payload.embeds.length} encadrés, ${text} caractères de texte)`;
+}
+
+// Last-resort digest: no embeds at all, just numbered links, within the 2000-char limit.
+function plainTextDigest(category: Category, items: NewItem[]): string {
+  const lines = items.map((item, i) => `${i + 1}. [${item.title.replace(/[[\]]/g, "")}](<${item.link}>)`);
+  let text = `**${category.name}** — ${items.length} nouvel(le)(s) article(s)`;
+  for (const line of lines) {
+    if (text.length + line.length + 1 > 1950) {
+      text += "\n…";
+      break;
+    }
+    text += `\n${line}`;
+  }
+  return text;
 }
 
 // Fetches each feed, records unseen items in seen_items and returns the ones that pass
